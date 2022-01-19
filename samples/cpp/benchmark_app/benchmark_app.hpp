@@ -58,6 +58,11 @@ static const char iterations_count_message[] =
 static const char infer_requests_count_message[] =
     "Optional. Number of infer requests. Default value is determined automatically for device.";
 
+
+/// @brief message for sleep time
+static const char sleep_time_message[] =
+    "Optional, sleep time for inference task";
+
 /// @brief message for execution time
 static const char execution_time_message[] = "Optional. Time in seconds to execute topology.";
 
@@ -260,6 +265,9 @@ DEFINE_uint32(niter, 0, iterations_count_message);
 /// @brief Time to execute topology in seconds
 DEFINE_uint32(t, 0, execution_time_message);
 
+/// @brief Time to sleep in milliseconds
+DEFINE_uint32(st, 0, sleep_time_message);
+
 /// @brief Number of infer requests in parallel
 DEFINE_uint32(nireq, 0, infer_requests_count_message);
 
@@ -378,6 +386,7 @@ static void showUsage() {
     std::cout << "    -b \"<integer>\"            " << batch_size_message << std::endl;
     std::cout << "    -stream_output            " << stream_output_message << std::endl;
     std::cout << "    -t                        " << execution_time_message << std::endl;
+    std::cout << "    -st                       " << sleep_time_message << std::endl;
     std::cout << "    -progress                 " << progress_message << std::endl;
     std::cout << "    -shape                    " << shape_message << std::endl;
     std::cout << "    -data_shape             " << data_shape_message << std::endl;

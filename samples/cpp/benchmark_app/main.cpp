@@ -9,6 +9,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <thread>
 
 // clang-format off
 #include "openvino/pass/serialize.hpp"
@@ -614,6 +615,8 @@ int main(int argc, char* argv[]) {
             }
         }
 
+        uint32_t st = FLAGS_st; 
+
         // Time limit
         uint32_t duration_seconds = 0;
         if (FLAGS_t != 0) {
@@ -818,6 +821,7 @@ int main(int argc, char* argv[]) {
         size_t processedFramesN = 0;
         auto startTime = Time::now();
         auto execTime = std::chrono::duration_cast<ns>(Time::now() - startTime).count();
+        auto execCount = 0;
 
         /** Start inference & calculate performance **/
         /** to align number if iterations to guarantee that last infer requests are
@@ -868,6 +872,7 @@ int main(int argc, char* argv[]) {
             }
 
             if (FLAGS_api == "sync") {
+                if(st>0) std::this_thread::sleep_for(std::chrono::milliseconds(st));
                 inferRequest->infer();
             } else {
                 // As the inference request is currently idle, the wait() adds no
@@ -877,6 +882,14 @@ int main(int argc, char* argv[]) {
                 // well, but as it uses just error codes it has no details like ‘what()’
                 // method of `std::exception` So, rechecking for any exceptions here.
                 inferRequest->wait();
+
+                
+                if(st>0) {
+                    execCount = iteration % app_inputs_info.size();
+                    if(execCount == app_inputs_info.size() - 1) {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(execCount * st));
+                    }
+                }
                 inferRequest->startAsync();
             }
             ++iteration;
