@@ -616,6 +616,12 @@ int main(int argc, char* argv[]) {
         }
 
         uint32_t st = FLAGS_st; 
+        uint32_t of = FLAGS_of;
+        uint32_t tf = FLAGS_tf;
+        double oldAvaLatency = 1000.0/tf;
+        double delayDir = 1.0;
+        
+        //uint32_t r = FLAGS_r;
 
         // Time limit
         uint32_t duration_seconds = 0;
@@ -821,7 +827,6 @@ int main(int argc, char* argv[]) {
         size_t processedFramesN = 0;
         auto startTime = Time::now();
         auto execTime = std::chrono::duration_cast<ns>(Time::now() - startTime).count();
-        auto execCount = 0;
 
         /** Start inference & calculate performance **/
         /** to align number if iterations to guarantee that last infer requests are
@@ -872,7 +877,17 @@ int main(int argc, char* argv[]) {
             }
 
             if (FLAGS_api == "sync") {
-                if(st>0) std::this_thread::sleep_for(std::chrono::milliseconds(st));
+                if(st>0 && iteration > 2) {
+                    auto target = 1000.0/st;
+                    auto cur = inferRequestsQueue.getLastLatency();
+                    int delay = target - cur;
+                    //std::cout << "delay = " << delay << ", target = " << target << ", cur = " << cur << std::endl;
+                    if(delay > 0) {
+                        //std::cout << "sleep = " << delay  << std::endl;
+                        std::this_thread::sleep_for(std::chrono::milliseconds(delay));
+                    }
+                }
+
                 inferRequest->infer();
             } else {
                 // As the inference request is currently idle, the wait() adds no
@@ -883,14 +898,51 @@ int main(int argc, char* argv[]) {
                 // method of `std::exception` So, rechecking for any exceptions here.
                 inferRequest->wait();
 
-                
-                if(st>0) {
-                    execCount = iteration % app_inputs_info.size();
-                    if(execCount == app_inputs_info.size() - 1) {
-                        std::this_thread::sleep_for(std::chrono::milliseconds(execCount * st));
+                static uint32_t times = 0;
+                double avaLatency = 0;
+                //r = 0;
+                //std::cout << "r = " << r <<", tf = " << tf << ", of = " << of << std::endl; 
+                if(of>0 && iteration > 2) {
+                    if(tf==0) tf = 1;
+                    auto ratio = 1.0 * tf / of;
+                    auto target = 1000.0 / tf;
+                    auto cur = inferRequestsQueue.getLastLatency();
+                    double delay = target - cur;
+                    //std::cout << "each dR = " << 1000.0/of / cur << std::endl;
+                    if(delay > 0.0) {
+                        if(times++ > 100) {
+                            avaLatency = inferRequestsQueue.getLastAverageLatency();
+                            auto dr = avaLatency / oldAvaLatency;
+                            if(dr <= 1.05) {
+                                // become better, keep dir
+                                delayDir *= dr / 1.05;
+                                if(dr <= 0.8)
+                                   delayDir *= 0.618;
+                            } else {
+                                // become worse, change dir
+                                delayDir *= -1.0 * dr;
+                                //if(dr >= 1.5)
+                                //   delayDir *= 1.2;
+                                if(delayDir > 1.0) delayDir = 1.0;
+                                if(delayDir < -1.0) delayDir = -1.0;
+                            }
+                            auto dR = 1000.0/of / avaLatency;
+                            std::cout << "of:" << of << " dR = " << dR << ", oldLatency=" << oldAvaLatency << ", newLatency = " << avaLatency << std::endl;
+                            auto tempDelay = delay;
+                            if(dR < 0.85 )
+                                delay = delay - delayDir * (1.0 - dR) * delay;
+                            times = 0;
+                            oldAvaLatency = avaLatency;
+                            std::cout << "shift delay = " <<  delay - tempDelay << std::endl;
+                        }
+                        if(ratio >= 0.5)
+                            delay = delay * 0.9;
+                        uint32_t value = delay + 0.2;
+                        //std::cout << "delay = " << delay << ", value = " << value << std::endl;
+                        std::this_thread::sleep_for(std::chrono::milliseconds(value));
                     }
-                }
-                inferRequest->startAsync();
+                } 
+            inferRequest->startAsync();
             }
             ++iteration;
 

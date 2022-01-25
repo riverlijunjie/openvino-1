@@ -63,6 +63,18 @@ static const char infer_requests_count_message[] =
 static const char sleep_time_message[] =
     "Optional, sleep time for inference task";
 
+// @brief message for target fps
+static const char target_fps_message[] =
+    "Optional, target fps for this inference task";
+
+// @brief message for original fps
+static const char original_fps_message[] =
+    "Optional, original fps for this inference task";
+
+// @brief message for original fps
+static const char ratio_message[] =
+    "Optional, ratio for this inference task";
+
 /// @brief message for execution time
 static const char execution_time_message[] = "Optional. Time in seconds to execute topology.";
 
@@ -267,6 +279,15 @@ DEFINE_uint32(t, 0, execution_time_message);
 
 /// @brief Time to sleep in milliseconds
 DEFINE_uint32(st, 0, sleep_time_message);
+
+/// @brief target fps
+DEFINE_uint32(tf, 0, target_fps_message);
+
+/// @brief original fps
+DEFINE_uint32(of, 0, original_fps_message);
+
+/// @brief target ratio
+DEFINE_uint32(r, 0, ratio_message);
 
 /// @brief Number of infer requests in parallel
 DEFINE_uint32(nireq, 0, infer_requests_count_message);

@@ -179,6 +179,31 @@ public:
         return _latencies;
     }
 
+    double getLastLatency() {
+        auto i = _latencies.size();
+        if(i<=0)
+            return 10.0;
+        else
+            return _latencies[i-1];
+    }
+
+    double getLastAverageLatency() {
+        auto n = _latencies.size();
+        auto i = 0;
+        if (n>100)
+            i = n - 1 - 100;
+        if (n==0)
+            return 1.0;
+        
+        auto sum = 0.0;
+        auto num = 0;
+        for(;i < n; i++){
+            sum += _latencies[i];
+            num ++;
+        }
+        return sum/num;
+    }
+
     std::vector<std::vector<double>> getLatencyGroups() {
         return _latency_groups;
     }
