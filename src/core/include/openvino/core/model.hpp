@@ -315,6 +315,9 @@ public:
     Model& operator=(const Model&) = delete;
     Model& operator=(Model&&) = delete;
 
+    void set_sleep_tm(const size_t& sleep_tm);
+    size_t get_sleep_tm();
+
 private:
     friend class ov::ModelAccessor;
 
@@ -351,6 +354,9 @@ private:
     std::shared_ptr<SharedRTInfo> m_shared_rt_info;
 
     mutable std::mutex m_topological_sort_mutex;
+
+    size_t m_sleep_tm = 0;
+    mutable std::mutex m_sleep_tm_mutex;
 };
 
 OPENVINO_API
@@ -401,5 +407,15 @@ OPENVINO_API ov::Dimension get_batch(const std::shared_ptr<const ov::Model>& f);
 /// \param f function where to set batch_size value
 /// \param batch_size Batch size value. For dynamic batch size, Dimension::dynamic() can be passed.
 OPENVINO_API void set_batch(const std::shared_ptr<ov::Model>& f, ov::Dimension batch_size);
+
+/// \brief Helper method to set sleep time to a Function
+///
+/// \details Set sleep time for task(POC)
+///
+/// \throws ***
+///
+/// \param f function where to set sleep_tm value
+/// \param sleep_tm Sleep time value. For dynamic sleep time.
+OPENVINO_API void set_sleeptm(const std::shared_ptr<ov::Model>& f, size_t sleep_tm);
 
 }  // namespace ov

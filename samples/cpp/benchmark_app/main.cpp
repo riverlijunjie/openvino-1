@@ -107,6 +107,90 @@ static void next_step(const std::string additional_info = "") {
               << (additional_info.empty() ? "" : " (" + additional_info + ")") << std::endl;
 }
 
+static int g_monitor = 1;
+struct _monitorData {
+    std::shared_ptr<ov::Model> model;
+    //std::shared_ptr<InferRequestsQueue> reqQueue;
+    InferRequestsQueue* reqQueue;
+    size_t tf;
+    size_t of;
+} g_monitorData;
+
+
+static void monitor_thread()
+{
+    size_t total = 0, num = 0;
+    size_t duration = 20; //ms
+
+    std::shared_ptr<ov::Model>& model = g_monitorData.model;
+    InferRequestsQueue *reqQueue = g_monitorData.reqQueue;
+    size_t tf = g_monitorData.tf; 
+    //size_t of = g_monitorData.of;
+    std::cout << "monitor_thread: tf = " << tf << std::endl;
+
+
+    while(reqQueue->getLatencySize() <= 2) {
+        std::cout << "wait size = " << reqQueue->getLatencySize() << std::endl; 
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+
+    if(tf<=0) tf = 1;
+
+    duration = 20 * 1000 / tf;
+    if(duration <= 10) duration = 10;
+    if(duration >= 1000) duration = 1000;
+    //duration = 300;
+    int delayTime = 0;
+    while (g_monitor) {
+         std::this_thread::sleep_for(std::chrono::milliseconds(duration));
+         total = reqQueue->getLatencySize() - num;
+         num = reqQueue->getLatencySize();
+         if(total <=0) {
+             duration *= 2;
+             if(duration >= 1000) duration = 1000;
+             continue;
+         }
+         double latency = 1.0 * duration / total;
+         double target = 1000.0 / tf;
+         int delay =  0.3 + target - latency;
+         //std::cout << "queue size = " << reqQueue->getLatencySize() << std::endl;
+         std::cout << "num = " << total << ", duration = " << duration << ", curFPS = "<< 1000 * total / duration << std::endl;
+         std::cout << "target = " << target << "ms, latency = " << latency << " ms" << std::endl;
+   
+         delayTime += delay;
+
+         if(delayTime > 0) {
+             ov::set_sleeptm(model, delayTime);
+             std::cout << "target-"<< tf <<": monitor thread set delayTime = " << delayTime << " ms" << std::endl << std::endl;
+         } else {
+             ov::set_sleeptm(model, 0);
+         }
+    }
+    ov::set_sleeptm(model, 0);
+    std::cout << "monitor thread exit..." << std::endl;
+}
+
+#if 0
+static void delay_infer(std::shared_ptr<InferRequestsQueue> reqQueue, size_t tf)
+{
+     static int inNum = 1;
+     auto start_time = Time::now();
+     auto outNum = reqQueue->getLatencySize();
+     auto duration = get_duration_ms_till_now(start_time);
+     auto flyNum = inNum - outNum;
+     inNum ++;     
+     double latency = 0.0;
+     double target = 1000.0 / tf;
+
+     // figure out average latency
+     if(duration >= 200 && outNum > 0) {
+         latency = duration / outNum;         
+     }
+     auto = target - latency;     
+
+}
+#endif
+
 /**
  * @brief The entry point of the benchmark application
  */
@@ -114,6 +198,7 @@ int main(int argc, char* argv[]) {
     std::shared_ptr<StatisticsReport> statistics;
     try {
         ov::runtime::CompiledModel compiledModel;
+        std::shared_ptr<ov::Model> g_model = nullptr;
 
         // ----------------- 1. Parsing and validating input arguments
         // -------------------------------------------------
@@ -410,6 +495,7 @@ int main(int argc, char* argv[]) {
 
             auto startTime = Time::now();
             auto model = core.read_model(FLAGS_m);
+            g_model = model;
             auto duration_ms = double_to_string(get_duration_ms_till_now(startTime));
             slog::info << "Read network took " << duration_ms << " ms" << slog::endl;
             if (statistics)
@@ -615,14 +701,6 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        uint32_t st = FLAGS_st; 
-        uint32_t of = FLAGS_of;
-        uint32_t tf = FLAGS_tf;
-        double oldAvaLatency = 1000.0/tf;
-        double delayDir = 1.0;
-        
-        //uint32_t r = FLAGS_r;
-
         // Time limit
         uint32_t duration_seconds = 0;
         if (FLAGS_t != 0) {
@@ -662,7 +740,7 @@ int main(int argc, char* argv[]) {
         // ----------------------------------------
         next_step();
 
-        InferRequestsQueue inferRequestsQueue(compiledModel, nireq, app_inputs_info.size(), FLAGS_pcseq);
+        InferRequestsQueue inferRequestsQueue(compiledModel,g_model, nireq, app_inputs_info.size(), FLAGS_pcseq, FLAGS_tf, FLAGS_of);
 
         bool inputHasName = false;
         if (inputFiles.size() > 0) {
@@ -828,6 +906,27 @@ int main(int argc, char* argv[]) {
         auto startTime = Time::now();
         auto execTime = std::chrono::duration_cast<ns>(Time::now() - startTime).count();
 
+#if 0
+        uint32_t st = FLAGS_st; 
+        uint32_t of = FLAGS_of;
+        uint32_t tf = FLAGS_tf;
+        double oldAvaLatency = 1000.0/tf;
+        double delayDir = 1.0;
+#endif
+
+        g_monitorData.model = g_model;
+        g_monitorData.reqQueue = &inferRequestsQueue;
+        g_monitorData.tf = FLAGS_tf;
+        g_monitorData.of = FLAGS_of;
+        std::thread pThread = std::thread(monitor_thread);
+
+        #if 0
+        g_monitor = 0;
+        if(g_model == nullptr)
+           std::cout << "g_model is null --------------------------------------------" << std::endl;
+        ov::set_sleeptm(g_model, 10);
+        #endif
+
         /** Start inference & calculate performance **/
         /** to align number if iterations to guarantee that last infer requests are
          * executed in the same conditions **/
@@ -877,6 +976,8 @@ int main(int argc, char* argv[]) {
             }
 
             if (FLAGS_api == "sync") {
+            
+            #if 0
                 if(st>0 && iteration > 2) {
                     auto target = 1000.0/st;
                     auto cur = inferRequestsQueue.getLastLatency();
@@ -887,6 +988,7 @@ int main(int argc, char* argv[]) {
                         std::this_thread::sleep_for(std::chrono::milliseconds(delay));
                     }
                 }
+            #endif
 
                 inferRequest->infer();
             } else {
@@ -898,6 +1000,7 @@ int main(int argc, char* argv[]) {
                 // method of `std::exception` So, rechecking for any exceptions here.
                 inferRequest->wait();
 
+             #if 0
                 static uint32_t times = 0;
                 double avaLatency = 0;
                 //r = 0;
@@ -942,6 +1045,7 @@ int main(int argc, char* argv[]) {
                         std::this_thread::sleep_for(std::chrono::milliseconds(value));
                     }
                 } 
+            #endif
             inferRequest->startAsync();
             }
             ++iteration;
@@ -965,6 +1069,9 @@ int main(int argc, char* argv[]) {
 
         // wait the latest inference executions
         inferRequestsQueue.waitAll();
+
+        g_monitor = 0;
+        pThread.join();  
 
         LatencyMetrics generalLatency(inferRequestsQueue.getLatencies());
         std::vector<LatencyMetrics> groupLatencies = {};

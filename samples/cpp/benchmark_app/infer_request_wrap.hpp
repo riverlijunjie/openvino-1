@@ -33,16 +33,30 @@ public:
 
     ~InferReqWrap() = default;
 
-    explicit InferReqWrap(ov::runtime::CompiledModel& model, size_t id, QueueCallbackFunction callbackQueue)
+    explicit InferReqWrap(ov::runtime::CompiledModel& model, size_t id,  const std::shared_ptr<ov::Model>& gm, size_t target, size_t original, QueueCallbackFunction callbackQueue)
         : _request(model.create_infer_request()),
           _id(id),
+          _tf(target),
+          _of(original),
           _lat_group_id(0),
           _callbackQueue(callbackQueue),
           outputClBuffer() {
         _request.set_callback([&](const std::exception_ptr& ptr) {
             // TODO: Add exception ptr rethrow in proper thread
             _endTime = Time::now();
-            _callbackQueue(_id, _lat_group_id, getExecutionTimeInMilliseconds());
+            auto latency = getExecutionTimeInMilliseconds();
+            _callbackQueue(_id, _lat_group_id, latency);
+            #if 0
+            int delay = 1000/_tf - latency;
+            std::cout << "tf = " << 1000/_tf << ", latency = " << latency << std::endl;
+            if(delay > 0) {
+                ov::set_sleeptm(gm, delay);
+                std::cout << "set sleep = " << delay << "ms" << std::endl;
+            } else {
+                ov::set_sleeptm(gm, 0);
+            }
+            #endif
+
         });
     }
 
@@ -101,17 +115,22 @@ private:
     Time::time_point _endTime;
     size_t _id;
     size_t _lat_group_id;
+    size_t _tf;
+    size_t _of;
     QueueCallbackFunction _callbackQueue;
     std::map<std::string, ::gpu::BufferType> outputClBuffer;
 };
 
 class InferRequestsQueue final {
 public:
-    InferRequestsQueue(ov::runtime::CompiledModel& model, size_t nireq, size_t lat_group_n, bool enable_lat_groups)
+    InferRequestsQueue(ov::runtime::CompiledModel& model, std::shared_ptr<ov::Model>& gModel, size_t nireq, size_t lat_group_n, bool enable_lat_groups, size_t target, size_t original)
         : enable_lat_groups(enable_lat_groups) {
         for (size_t id = 0; id < nireq; id++) {
             requests.push_back(std::make_shared<InferReqWrap>(model,
                                                               id,
+                                                              gModel,
+                                                              target,
+                                                              original,
                                                               std::bind(&InferRequestsQueue::putIdleRequest,
                                                                         this,
                                                                         std::placeholders::_1,
@@ -202,6 +221,10 @@ public:
             num ++;
         }
         return sum/num;
+    }
+
+    size_t getLatencySize() {
+        return _latencies.size();
     }
 
     std::vector<std::vector<double>> getLatencyGroups() {

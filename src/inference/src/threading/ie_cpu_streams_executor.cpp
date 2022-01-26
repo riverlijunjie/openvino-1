@@ -25,6 +25,9 @@
 using namespace openvino;
 
 namespace InferenceEngine {
+    
+extern std::atomic<size_t> g_sleep_tm_cpu;
+
 struct CPUStreamsExecutor::Impl {
     struct Stream {
 #if IE_THREAD == IE_THREAD_TBB || IE_THREAD == IE_THREAD_TBB_AUTO
@@ -231,6 +234,10 @@ struct CPUStreamsExecutor::Impl {
                         }
                     }
                     if (task) {
+                        size_t sleep_tm = g_sleep_tm_cpu;
+                        if(sleep_tm > 0) {
+                            std::this_thread::sleep_for(std::chrono::milliseconds(sleep_tm));
+                        }
                         Execute(task, *(_streams.local()));
                     }
                 }

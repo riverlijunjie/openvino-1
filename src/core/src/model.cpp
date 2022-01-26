@@ -930,6 +930,17 @@ ov::Output<ov::Node> ov::Model::add_output(const ov::Output<ov::Node>& port) {
     return result->output(0);
 }
 
+size_t ov::Model::get_sleep_tm() {
+    std::lock_guard<std::mutex> lk(m_sleep_tm_mutex);
+    return m_sleep_tm;
+}
+#include "ie/cpp/ie_infer_request.hpp"
+void ov::Model::set_sleep_tm(const size_t& sleep_tm) {
+    std::lock_guard<std::mutex> lk(m_sleep_tm_mutex);
+    m_sleep_tm = sleep_tm;
+    InferenceEngine::set_sleep_time(sleep_tm);
+}
+
 namespace bs_util {
 static int64_t get_batch(const ov::Layout& layout, const ov::PartialShape& shape) {
     auto batch_idx = ov::layout::batch_idx(layout);
@@ -1006,6 +1017,10 @@ ov::Dimension ov::get_batch(const std::shared_ptr<const ov::Model>& f) {
         OPENVINO_ASSERT(false, stream.str());
     }
     return batch_size;
+}
+
+void ov::set_sleeptm(const std::shared_ptr<ov::Model>& f, size_t sleep_tm) {
+    f->set_sleep_tm(sleep_tm);
 }
 
 void ov::set_batch(const std::shared_ptr<ov::Model>& f, ov::Dimension batch_size) {

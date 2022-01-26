@@ -63,6 +63,11 @@ InferRequest::~InferRequest() {
     _impl = {};
 }
 
+std::atomic<size_t> g_sleep_tm_cpu(0);
+void set_sleep_time(const size_t& sleep_tm) {
+    g_sleep_tm_cpu = sleep_tm;
+}
+
 InferRequest::InferRequest(const IInferRequestInternal::Ptr& impl, const std::shared_ptr<void>& so)
     : _impl(impl),
       _so(so) {

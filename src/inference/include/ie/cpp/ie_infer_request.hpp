@@ -25,6 +25,8 @@ namespace details {
 class ICompletionCallbackWrapper;
 }  // namespace details
 
+INFERENCE_ENGINE_API_CPP(void) set_sleep_time(const size_t& sleep_tm);
+
 /**
  * @copybrief IInferRequest
  *

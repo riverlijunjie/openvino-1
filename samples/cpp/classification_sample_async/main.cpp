@@ -142,6 +142,7 @@ int main(int argc, char* argv[]) {
         slog::info << "Set batch size " << std::to_string(batchSize) << slog::endl;
         ov::set_batch(model, batchSize);
         printInputAndOutputsInfo(*model);
+        ov::set_sleeptm(model, 100);
 
         // -------- Step 6. Loading model to the device --------
         slog::info << "Loading model to the device " << FLAGS_d << slog::endl;
@@ -150,13 +151,18 @@ int main(int argc, char* argv[]) {
         // -------- Step 7. Create infer request --------
         slog::info << "Create infer request" << slog::endl;
         ov::runtime::InferRequest infer_request = compiled_model.create_infer_request();
+        ov::runtime::InferRequest infer_request2 = compiled_model.create_infer_request();
 
         // -------- Step 8. Combine multiple input images as batch --------
         ov::runtime::Tensor input_tensor = infer_request.get_input_tensor();
+        ov::runtime::Tensor input_tensor2 = infer_request2.get_input_tensor();
 
         for (size_t image_id = 0; image_id < images_data.size(); ++image_id) {
             const size_t image_size = shape_size(model->input().get_shape()) / batchSize;
             std::memcpy(input_tensor.data<std::uint8_t>() + image_id * image_size,
+                        images_data[image_id].get(),
+                        image_size);
+            std::memcpy(input_tensor2.data<std::uint8_t>() + image_id * image_size,
                         images_data[image_id].get(),
                         image_size);
         }
@@ -164,8 +170,13 @@ int main(int argc, char* argv[]) {
         // -------- Step 9. Do asynchronous inference --------
         size_t num_iterations = 10;
         size_t cur_iteration = 0;
+        size_t cur_iteration2 = 0;
         std::condition_variable condVar;
+        std::condition_variable condVar2;
         std::mutex mutex;
+        std::mutex mutex2;
+        auto t1_t1 = std::chrono::high_resolution_clock::now();
+        auto t2_t1 = std::chrono::high_resolution_clock::now();
 
         // -------- Step 10. Do asynchronous inference --------
         infer_request.set_callback([&](std::exception_ptr ex) {
@@ -174,11 +185,17 @@ int main(int argc, char* argv[]) {
 
             std::lock_guard<std::mutex> l(mutex);
             cur_iteration++;
-            slog::info << "Completed " << cur_iteration << " async request execution" << slog::endl;
+            slog::info << "Request 1 Completed " << cur_iteration << " async request execution" << slog::endl;
             if (cur_iteration < num_iterations) {
                 // here a user can read output containing inference results and put new
                 // input to repeat async request again
+                auto t1_t2 = std::chrono::high_resolution_clock::now();
+                slog::info << "req1 time: " << std::chrono::duration_cast<std::chrono::milliseconds>(t1_t2 - t1_t1).count() << slog::endl;
+                t1_t1 = t1_t2;
                 infer_request.start_async();
+                if(cur_iteration == 5) {
+                    ov::set_sleeptm(model, 0);
+                }
             } else {
                 // continue sample execution after last Asynchronous inference request
                 // execution
@@ -186,14 +203,42 @@ int main(int argc, char* argv[]) {
             }
         });
 
+        infer_request2.set_callback([&](std::exception_ptr ex) {
+            if (ex)
+                throw ex;
+
+            std::lock_guard<std::mutex> l(mutex2);
+            cur_iteration2++;
+            slog::info << "Request 2 Completed " << cur_iteration2 << " async request execution" << slog::endl;
+            if (cur_iteration2 < num_iterations) {
+                // here a user can read output containing inference results and put new
+                // input to repeat async request again
+                auto t2_t2 = std::chrono::high_resolution_clock::now();
+                slog::info << "req2 time: " << std::chrono::duration_cast<std::chrono::milliseconds>(t2_t2 - t2_t1).count() << slog::endl;
+                t2_t1 = t2_t2;
+                infer_request2.start_async();
+            } else {
+                // continue sample execution after last Asynchronous inference request
+                // execution
+                condVar2.notify_one();
+            }
+        });
+
         // Start async request for the first time
-        slog::info << "Start inference (asynchronous executions)" << slog::endl;
+        slog::info << "Start inference1 (asynchronous executions)" << slog::endl;
         infer_request.start_async();
+        slog::info << "Start inference2 (asynchronous executions)" << slog::endl;
+        infer_request2.start_async();
 
         // Wait all iterations of the async request
         std::unique_lock<std::mutex> lock(mutex);
         condVar.wait(lock, [&] {
             return cur_iteration == num_iterations;
+        });
+
+        std::unique_lock<std::mutex> lock2(mutex2);
+        condVar2.wait(lock2, [&] {
+            return cur_iteration2 == num_iterations;
         });
 
         slog::info << "Completed async requests execution" << slog::endl;
