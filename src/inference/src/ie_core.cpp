@@ -1138,6 +1138,13 @@ public:
             if (config_is_device_name_in_regestry) {
                 SetConfigForPlugins(any_copy(config.second.as<ov::AnyMap>()), config.first);
             }
+            if (config.first == CONFIG_KEY(TBB_TERMINATE_ENABLE)) {
+                if (config.second == CONFIG_VALUE(NO)) {
+                    executorManagerPtr->setTbbFlag(false);
+                } else {
+                    executorManagerPtr->setTbbFlag(true);
+                }
+            }
         }
     }
 
