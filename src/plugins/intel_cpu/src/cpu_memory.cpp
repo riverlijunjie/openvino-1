@@ -33,6 +33,15 @@ namespace {
     }
 }   // namespace
 
+static std::map<void*, size_t> memInfo;
+static std::mutex g_mem_mutex;
+static size_t get_mem_size() {
+    size_t size = 0;
+    for (auto it = memInfo.begin(); it!= memInfo.end(); ++it)
+        size += it->second;
+    return size;
+}
+
 Memory::Memory(const dnnl::engine& eng) :
     eng(eng), mgrHandle(std::make_shared<DnnlMemoryMngr>(std::unique_ptr<MemoryMngrWithReuse>(new MemoryMngrWithReuse())), this) {}
 Memory::Memory(const dnnl::engine& eng, std::unique_ptr<IMemoryMngr> mngr) :
@@ -181,6 +190,11 @@ bool MemoryMngrWithReuse::resize(size_t size) {
         if (!ptr) {
             throw std::bad_alloc();
         }
+        {
+            std::lock_guard<std::mutex> guard(g_mem_mutex);
+            memInfo[ptr] = size;
+            std::cout << "allocate " << size <<", total num = " << memInfo.size() << ", total size = " << get_mem_size() << std::endl;
+        }
         _memUpperBound = size;
         _useExternalStorage = false;
         _data = decltype(_data)(ptr, destroy);
@@ -196,6 +210,15 @@ bool MemoryMngrWithReuse::hasExtBuffer() const noexcept {
 void MemoryMngrWithReuse::release(void *ptr) {}
 
 void MemoryMngrWithReuse::destroy(void *ptr) {
+    {
+        std::lock_guard<std::mutex> guard(g_mem_mutex);
+        auto it = memInfo.find(ptr);
+        if (it != memInfo.end()) {
+            size_t size = it->second;
+            memInfo.erase(it);
+            std::cout << "free " << size <<", total num = " << memInfo.size() << ", total size = " << get_mem_size()<< std::endl;
+        }
+    }
     dnnl::impl::free(ptr);
 }
 

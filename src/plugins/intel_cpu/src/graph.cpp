@@ -62,6 +62,9 @@ typedef std::vector<edge_cluster_t> edge_clusters_t;
 
 dnnl::engine Graph::eng(dnnl::engine::kind::cpu, 0);
 
+static size_t reuse_total_size = 0;
+static std::mutex g_reuse_mutex;
+
 template<typename NET>
 void Graph::CreateGraph(NET &net, const ExtensionManager::Ptr& extMgr,
         WeightsSharing::Ptr &w_cache) {
@@ -686,9 +689,10 @@ void Graph::AllocateWithReuse() {
     }
 
     edge_clusters.resize(edge_clusters_count);
-
+    std::cout << "To Memory Solver edge_clusters_count = " << edge_clusters_count << std::endl;
     const int64_t alignment = 32;  // 32 bytes
 
+    auto start = std::chrono::system_clock::now();
     std::vector<MemorySolver::Box> boxes(edge_clusters.size());
     for (int i = 0; i < edge_clusters.size(); i++) {
         MemorySolver::Box &box = boxes[i];
@@ -733,6 +737,15 @@ void Graph::AllocateWithReuse() {
     MemorySolver memSolver(boxes);
     size_t total_size = static_cast<size_t>(memSolver.solve()) * alignment;
 
+    auto end = std::chrono::system_clock::now();
+    std::chrono::duration<double> diff = end - start;
+    std::cout << "MemorySolver cost " << 1000 * diff.count() << "ms" << std::endl;
+
+    {
+        std::lock_guard<std::mutex> guard(g_reuse_mutex);
+        reuse_total_size += total_size;
+        std::cout << "Reused size " << total_size << ", total = " << reuse_total_size << std::endl;
+    }
     memWorkspace = std::make_shared<Memory>(eng);
     memWorkspace->Create(DnnlBlockedMemoryDesc(InferenceEngine::Precision::I8, Shape(InferenceEngine::SizeVector{total_size})));
 
@@ -772,10 +785,20 @@ void Graph::Allocate() {
     for (auto& edge : graphEdges) edge->init();
 
     // Allocate memory space for all edges marked with NeedAllocation
+    auto start = std::chrono::system_clock::now();
     AllocateWithReuse();
+    auto end = std::chrono::system_clock::now();
+    std::chrono::duration<double> diff = end - start;
+    std::cout << "AllocateWithReuse cost " << 1000 * diff.count() << "ms" << std::endl;
 
     // Create dummy memory with undefined desc for edges that are need allocation but has not been allocated withing mem solver
-    for (auto& edge : graphEdges) edge->allocate();
+    size_t dummy_size = 0;
+    for (auto& edge : graphEdges) {
+        edge->allocate();
+        if (edge->getMemoryPtr()->getDescPtr()->getCurrentMemSize() != MemoryDesc::UNDEFINED_SIZE)
+            dummy_size += edge->getMemoryPtr()->GetSize();
+    }
+    std::cout << "dummy_size = " << dummy_size << std::endl;
 
     // Resolve all other edges with status NotAllocated and in-place
     for (auto& node : graphNodes) node->resolveInPlaceEdges();
