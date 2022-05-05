@@ -51,8 +51,11 @@ public:
 
     void init();
     void allocate(const void* mem_ptr = nullptr);
+
+    void allocate(DnnlMemoryMngrPtr memMngr);
     void externalAllocate(MKLDNNWeightsSharing::Ptr weightsCache);
     void reuse(MKLDNNMemoryPtr ptr);
+
     void validate();
     void drop();
 
@@ -104,6 +107,8 @@ private:
 
     MKLDNNEdgePtr getBaseEdge(int look = LOOK_BOTH);
     bool inPlace(LOOK look = LOOK_BOTH);
+    void allocateCommon(const std::function<void(const MKLDNNMemoryPtr&, const MemoryDesc&)>& allocate);
+
     friend class MKLDNNGraph;
 };
 
