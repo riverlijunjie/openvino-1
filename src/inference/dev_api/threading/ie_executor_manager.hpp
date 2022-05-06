@@ -66,6 +66,17 @@ public:
      */
     INFERENCE_ENGINE_DEPRECATED("Use IInferencePlugin::executorManager() instead")
     static ExecutorManager* getInstance();
+
+    /**
+     * @brief Set TBB terminate flag
+     * @param flag A boolean value:
+     * True to terminate tbb when resetTbb() is called
+     * False to not terminate tbb when resetTbb() is called
+     * @return void
+     */
+    virtual void setTbbFlag(bool flag) = 0;
+    virtual bool getTbbFlag() = 0;
+    virtual void resetTbb() = 0;
 };
 
 INFERENCE_ENGINE_API_CPP(ExecutorManager::Ptr) executorManager();

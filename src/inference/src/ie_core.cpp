@@ -10,6 +10,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <threading/ie_executor_manager.hpp>
 #include <vector>
 
 #include "any_copy.hpp"
@@ -383,7 +384,9 @@ public:
         opsetNames.insert("opset8");
     }
 
-    ~CoreImpl() override = default;
+    ~CoreImpl() {
+        executorManager()->resetTbb();
+    }
 
     /**
      * @brief Register plugins for devices which are located in .xml configuration file.
@@ -798,6 +801,10 @@ public:
                         "You can only get_config of the AUTO itself (without devices). "
                         "get_config is also possible for the individual devices before creating the AUTO on top.");
 
+        if (name == ov::force_tbb_terminate.name()) {
+            const auto flag = executorManager()->getTbbFlag();
+            return decltype(ov::force_tbb_terminate)::value_type(flag);
+        }
         auto parsed = parseDeviceNameIntoConfig(deviceName, arguments);
         return GetCPPPluginByName(parsed._deviceName).get_property(name, parsed._config);
     }
@@ -1046,6 +1053,18 @@ public:
      */
     void SetConfigForPlugins(const std::map<std::string, std::string>& configMap, const std::string& deviceName) {
         auto config = configMap;
+
+        for (auto& item : config) {
+            if (item.first == ov::force_tbb_terminate.name()) {
+                auto flag = item.second == CONFIG_VALUE(YES) ? true : false;
+                executorManager()->setTbbFlag(flag);
+                config.erase(item.first);
+                break;
+            }
+        }
+        if (config.empty()) {
+            return;
+        }
 
         InferenceEngine::DeviceIDParser parser(deviceName);
         std::string clearDeviceName = parser.getDeviceName();
