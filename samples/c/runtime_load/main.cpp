@@ -213,7 +213,7 @@ int run(int argc, char** argv) {
         using ie_network_free_f = void(ie_network_t**);
         using ie_core_free_f = void(ie_core_t**);
         using ie_core_set_config_f = IEStatusCode(ie_core_t*, const ie_config_t*, const char*);
-        using ie_cleanup_f = void();
+        // using ie_cleanup_f = void();
 
         // auto stub_ie_core_create = loader->getEntry<ie_core_create_f>("ie_core_create");
 #define EXTRACT_FUNC(name) auto name = loader->getEntry<name##_f>(#name);
@@ -243,7 +243,7 @@ int run(int argc, char** argv) {
         EXTRACT_FUNC(ie_network_free)
         EXTRACT_FUNC(ie_core_free)
         EXTRACT_FUNC(ie_core_set_config)
-        EXTRACT_FUNC(ie_cleanup)
+        // EXTRACT_FUNC(ie_cleanup)
 #undef EXTRAC_FUNC
 
         // --------------------------- Step 1. Initialize inference engine core
@@ -432,7 +432,7 @@ int run(int argc, char** argv) {
         ie_network_name_free(&output_name);
         ie_network_free(&network);
         ie_core_free(&core);  // This call will cause segmentfault for -fno-gnu-unique
-        ie_cleanup();
+        // ie_cleanup();
         std::this_thread::sleep_for(std::chrono::seconds(1));
     } catch (...) {
     }
@@ -442,9 +442,12 @@ int run(int argc, char** argv) {
 }
 
 int main(int argc, char** argv) {
-    auto ret = run(argc, argv);
-    std::cout << "APP will exit after 3s" << std::endl << std::endl;
-    std::this_thread::sleep_for(std::chrono::seconds(3));
+    int ret;
+    while (true) {
+        run(argc, argv);
+        std::cout << "APP will sleep 3s" << std::endl << std::endl;
+        std::this_thread::sleep_for(std::chrono::seconds(3));
+    }
     std::cout << "APP has exited" << std::endl;
     return ret;
 }
