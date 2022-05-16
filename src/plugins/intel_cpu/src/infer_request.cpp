@@ -427,12 +427,8 @@ void ov::intel_cpu::MKLDNNLegacyInferRequest::SetBlob(const std::string& name, c
                 IE_THROW(ParameterMismatch) << "Failed to set input blob. Blocking descriptor mismatch.";
             }
 
-            auto pBlob = MemoryDescUtils::interpretAsBlob(graph->getInputNodeByName(name)->getChildEdgesAtPort(0)[0]->getMemory());
-            if (!pBlob) {
-                IE_THROW() << "Blob returned after trying to interpret input node's memory is nullable. Input node name: " << name;
-            }
-
-            if (data->getTensorDesc() == pBlob->getTensorDesc() &&
+            auto pBlobDesc = MemoryDescUtils::interpretAsBlobDesc(graph->getInputNodeByName(name)->getChildEdgesAtPort(0)[0]->getMemory());
+            if (data->getTensorDesc() == pBlobDesc &&
                 graph->_normalizePreprocMap.find(name) == graph->_normalizePreprocMap.end() && !graph->getProperty().batchLimit) {
                 externalPtr[name] = data->buffer();
             } else if (externalPtr.find(name) != externalPtr.end()) {
@@ -465,11 +461,8 @@ void ov::intel_cpu::MKLDNNLegacyInferRequest::SetBlob(const std::string& name, c
                 IE_THROW(ParameterMismatch) << "Failed to set output blob. Blocking descriptor mismatch.";
         }
 
-        auto pBlob = MemoryDescUtils::interpretAsBlob(graph->getOutputNodeByName(name)->getParentEdgesAtPort(0)[0]->getMemory());
-        if (!pBlob)
-            IE_THROW() << "Blob returned after trying to interpret output node's memory is nullable. Output node name: " << name;
-
-        if (data->getTensorDesc() == pBlob->getTensorDesc() &&
+        auto pBlobDesc = MemoryDescUtils::interpretAsBlobDesc(graph->getOutputNodeByName(name)->getParentEdgesAtPort(0)[0]->getMemory());
+        if (data->getTensorDesc() == pBlobDesc &&
                 !graph->getProperty().batchLimit) {
             externalPtr[name] = data->buffer();
         } else if (externalPtr.find(name) != externalPtr.end()) {
@@ -498,12 +491,8 @@ InferenceEngine::Blob::Ptr ov::intel_cpu::MKLDNNLegacyInferRequest::GetBlob(cons
         }
 
         if (_inputs.find(name) == _inputs.end()) {
-            auto pBlob = MemoryDescUtils::interpretAsBlob(graph->getInputNodeByName(name)->getChildEdgesAtPort(0)[0]->getMemory());
-            if (!pBlob) {
-                IE_THROW() << "Blob returned after trying to interpret input node's memory is nullable. Input node name: " << name;
-            }
-
-            InferenceEngine::TensorDesc desc = pBlob->getTensorDesc();
+            auto pBlobDesc = MemoryDescUtils::interpretAsBlobDesc(graph->getInputNodeByName(name)->getChildEdgesAtPort(0)[0]->getMemory());
+            InferenceEngine::TensorDesc desc = pBlobDesc;
 
             if (_networkInputs.find(name) != _networkInputs.end()) {
                 InferenceEngine::Layout l = _networkInputs[name]->getLayout();
@@ -515,7 +504,7 @@ InferenceEngine::Blob::Ptr ov::intel_cpu::MKLDNNLegacyInferRequest::GetBlob(cons
 
             _inputs[name] = make_blob_with_precision(desc);
             _inputs[name]->allocate();
-            if (pBlob->getTensorDesc() == desc &&
+            if (pBlobDesc == desc &&
                 graph->_normalizePreprocMap.find(name) == graph->_normalizePreprocMap.end() && !graph->getProperty().batchLimit) {
                 externalPtr[name] = _inputs[name]->buffer();
             }
@@ -543,11 +532,7 @@ InferenceEngine::Blob::Ptr ov::intel_cpu::MKLDNNLegacyInferRequest::GetBlob(cons
 
     if (graph->hasOutputWithName(name)) {
         if (_outputs.find(name) == _outputs.end()) {
-            auto pBlob = MemoryDescUtils::interpretAsBlob(graph->getOutputNodeByName(name)->getParentEdgesAtPort(0)[0]->getMemory());
-            if (!pBlob) {
-                IE_THROW() << "Blob returned after trying to interpret output node's memory is nullable. Output node name: " << name;
-            }
-
+            auto pBlobDesc = MemoryDescUtils::interpretAsBlobDesc(graph->getOutputNodeByName(name)->getParentEdgesAtPort(0)[0]->getMemory());
             if (!data) {
                 InferenceEngine::TensorDesc desc = _networkOutputs[name]->getTensorDesc();
                 desc.setPrecision(normalizeToSupportedPrecision(desc.getPrecision()));
@@ -562,7 +547,7 @@ InferenceEngine::Blob::Ptr ov::intel_cpu::MKLDNNLegacyInferRequest::GetBlob(cons
                 data = make_blob_with_precision(desc);
                 data->allocate();
             } else {
-                const auto& expectedTensorDesc = pBlob->getTensorDesc();
+                const auto& expectedTensorDesc = pBlobDesc;
 
                 if (expectedTensorDesc.getPrecision() != data->getTensorDesc().getPrecision()) {
                     IE_THROW(ParameterMismatch) << "Network input and output use the same name: " << name << " but expect blobs with different precision: "
@@ -582,7 +567,7 @@ InferenceEngine::Blob::Ptr ov::intel_cpu::MKLDNNLegacyInferRequest::GetBlob(cons
             }
 
             _outputs[name] = data;
-            if (!externalPtr.count(name) && data->getTensorDesc() == pBlob->getTensorDesc() && !graph->getProperty().batchLimit) {
+            if (!externalPtr.count(name) && data->getTensorDesc() == pBlobDesc && !graph->getProperty().batchLimit) {
                 externalPtr[name] = data->buffer();
             }
         }
