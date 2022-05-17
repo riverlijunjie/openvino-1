@@ -373,16 +373,6 @@ ov_status_e ov_core_get_property(const ov_core_t* core, const char* device_name,
     return ov_status_e::OK;
 }
 
-ov_status_e ov_core_add_extension(const ov_core_t* core, const char* library_path) {
-    if (!core || !library_path) {
-        return ov_status_e::GENERAL_ERROR;
-    }
-    try {
-        core->object->add_extension(library_path);
-    } CATCH_OV_EXCEPTIONS
-    return ov_status_e::OK;
-}
-
 ov_status_e ov_core_get_available_devices(const ov_core_t* core, ov_available_devices_t* devices) {
     if (!core || !devices) {
         return ov_status_e::GENERAL_ERROR;
