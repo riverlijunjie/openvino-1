@@ -14,7 +14,7 @@
 #include <tuple>
 #include <memory>
 #include <streambuf>
-#include <istream>
+#include <fstream>
 
 #include "c_api/ov_c_api.h"
 #include "openvino/openvino.hpp"
@@ -246,16 +246,16 @@ ov_status_e ov_core_read_model(const ov_core_t *core,
 }
 
 ov_status_e ov_core_read_model_from_memory(const ov_core_t *core,
-                                    const char *model_path,
+                                    const char *model_str,
                                     const ov_tensor_t *weights,
                                     ov_model_t **model) {
-    if (!core || !model_path || !weights || !model) {
+    if (!core || !model_str || !weights || !model) {
         return ov_status_e::GENERAL_ERROR;
     }
 
     try {
         *model = new ov_model_t;
-        (*model)->object = core->object->read_model(model_path, *(weights->object));
+        (*model)->object = core->object->read_model(model_str, *(weights->object));
     } CATCH_OV_EXCEPTIONS
     return ov_status_e::OK;
 }
@@ -275,11 +275,14 @@ ov_status_e ov_core_compile_model(const ov_core_t* core,
 
     try {
         std::string dev_name = "";
+        ov::CompiledModel object;
         if (device_name) {
             dev_name = device_name;
+            object = core->object->compile_model(model->object, dev_name);
+        } else {
+            object = core->object->compile_model(model->object);
         }
         *compiled_model = new ov_compiled_model_t;
-        auto object = core->object->compile_model(model->object, dev_name);
         (*compiled_model)->object = std::make_shared<ov::CompiledModel>(std::move(object));
     } CATCH_OV_EXCEPTIONS
     return ov_status_e::OK;
@@ -295,12 +298,15 @@ ov_status_e ov_core_compile_model_from_file(const ov_core_t* core,
     }
 
     try {
+        ov::CompiledModel object;
         std::string dev_name = "";
         if (device_name) {
             dev_name = device_name;
+            object = core->object->compile_model(model_path, dev_name);
+        } else {
+            object = core->object->compile_model(model_path);
         }
         *compiled_model = new ov_compiled_model_t;
-        auto object = core->object->compile_model(model_path, dev_name);
         (*compiled_model)->object = std::make_shared<ov::CompiledModel>(std::move(object));
     } CATCH_OV_EXCEPTIONS
     return ov_status_e::OK;
@@ -360,7 +366,7 @@ ov_status_e ov_core_get_property(const ov_core_t* core, const char* device_name,
             for (const auto& i : supported_properties) {
                 tmp_s = tmp_s + "\n" + i;
             }
-            if (tmp_s.length() + 1 > 256) {
+            if (tmp_s.length() + 1 > 512) {
                 return ov_status_e::GENERAL_ERROR;
             }
             std::copy_n(tmp_s.begin(), tmp_s.length() + 1, property_value->value_s);
@@ -374,7 +380,7 @@ ov_status_e ov_core_get_property(const ov_core_t* core, const char* device_name,
 }
 
 ov_status_e ov_core_get_available_devices(const ov_core_t* core, ov_available_devices_t* devices) {
-    if (!core || !devices) {
+    if (!core) {
         return ov_status_e::GENERAL_ERROR;
     }
     try {
@@ -496,6 +502,50 @@ ov_status_e ov_model_get_inputs(const ov_model_t* model, ov_output_node_list_t *
     return ov_status_e::OK;
 }
 
+ov_status_e ov_node_get_tensor_name(ov_output_node_list_t* nodes, size_t idx,
+                                    char** tensor_name) {
+    if (!nodes || !tensor_name || idx >= nodes->num) {
+        return ov_status_e::GENERAL_ERROR;
+    }
+
+    try {
+        *tensor_name = str_to_char_array(nodes->output_nodes[idx].object->get_any_name());
+    } CATCH_OV_EXCEPTIONS
+
+    return ov_status_e::OK;
+}
+
+ov_status_e ov_node_get_tensor_shape(ov_output_node_list_t* nodes, size_t idx,
+                                    ov_shape_t tensor_shape) {
+    if (!nodes || idx >= nodes->num) {
+        return ov_status_e::GENERAL_ERROR;
+    }
+
+    try {
+        auto shape = nodes->output_nodes[idx].object->get_shape();
+        if (shape.size() > 4) {
+            return ov_status_e::GENERAL_ERROR;
+        }
+        std::copy_n(shape.begin(), shape.size(), tensor_shape);
+    } CATCH_OV_EXCEPTIONS
+
+    return ov_status_e::OK;
+}
+
+ov_status_e ov_node_get_tensor_type(ov_output_node_list_t* nodes, size_t idx,
+                                    ov_element_type_e *tensor_type) {
+    if (!nodes || idx >= nodes->num) {
+        return ov_status_e::GENERAL_ERROR;
+    }
+
+    try {
+        auto type = (ov::element::Type_t)nodes->output_nodes[idx].object->get_element_type();
+        *tensor_type = (ov_element_type_e)type;
+    } CATCH_OV_EXCEPTIONS
+
+    return ov_status_e::OK;
+}
+
 ov_status_e ov_model_get_input_by_name(const ov_model_t* model,
                                 const char* tensor_name,
                                 ov_output_node_t **input_node) {
@@ -565,7 +615,7 @@ ov_status_e ov_model_reshape(const ov_model_t* model,
     return ov_status_e::OK;
 }
 
-ov_status_e ov_model_get_friendly_name(const ov_model_t* model, char **friendly_name) {
+ov_status_e ov_model_get_friendly_name(const ov_model_t* model, char** friendly_name) {
     if (!model || !friendly_name) {
         return ov_status_e::GENERAL_ERROR;
     }
@@ -576,13 +626,19 @@ ov_status_e ov_model_get_friendly_name(const ov_model_t* model, char **friendly_
     return ov_status_e::OK;
 }
 
-void ov_output_nodes_free(ov_output_node_list_t *output_nodes) {
-    if (!output_nodes) {
-        return;
+void ov_output_node_list_free(ov_output_node_list_t *output_nodes) {
+    if (output_nodes) {
+        delete[] output_nodes->output_nodes;
+        output_nodes->output_nodes = nullptr;
     }
-    delete[] output_nodes->output_nodes;
-    delete output_nodes;
-    output_nodes = nullptr;
+}
+
+void ov_output_node_free(ov_output_node_t *output_node) {
+    delete output_node;
+}
+
+void ov_name_free(char *content) {
+    delete content;
 }
 
 ov_status_e ov_preprocess_create(const ov_model_t* model,
@@ -723,7 +779,8 @@ ov_status_e ov_preprocess_input_tensor_info_set_layout(ov_preprocess_input_tenso
         return ov_status_e::GENERAL_ERROR;
     }
     try {
-        preprocess_input_tensor_info->object->set_layout(layout);
+        ov::Layout tmp_layout(std::string(layout, 4));
+        preprocess_input_tensor_info->object->set_layout(tmp_layout);
     } CATCH_OV_EXCEPTIONS
 
     return ov_status_e::OK;
@@ -826,7 +883,8 @@ ov_status_e ov_preprocess_input_model_set_layout(ov_preprocess_input_model_info_
         return ov_status_e::GENERAL_ERROR;
     }
     try {
-        preprocess_input_model_info->object->set_layout(layout);
+        ov::Layout tmp_layout(std::string(layout, 4));
+        preprocess_input_model_info->object->set_layout(tmp_layout);
     } CATCH_OV_EXCEPTIONS
 
     return ov_status_e::OK;
@@ -978,6 +1036,22 @@ ov_status_e ov_compiled_model_get_property(const ov_compiled_model_t* compiled_m
     return ov_status_e::OK;
 }
 
+ov_status_e ov_compiled_model_export(const ov_compiled_model_t* compiled_model,
+                                const char* export_model_path) {
+    if (!compiled_model || !export_model_path) {
+        return ov_status_e::GENERAL_ERROR;
+    }
+    try {
+        std::ofstream model_file(export_model_path, std::ios::out | std::ios::binary);
+        if (model_file.is_open()) {
+            compiled_model->object->export_model(model_file);
+        } else {
+            return ov_status_e::GENERAL_ERROR;
+        }
+    } CATCH_OV_EXCEPTIONS
+    return ov_status_e::OK;
+}
+
 void ov_infer_request_free(ov_infer_request_t *infer_request) {
     delete infer_request;
 }
@@ -995,6 +1069,19 @@ ov_status_e ov_infer_request_set_tensor(ov_infer_request_t *infer_request,
     return ov_status_e::OK;
 }
 
+ov_status_e ov_infer_request_set_input_tensor(ov_infer_request_t* infer_request,
+                                size_t idx, const ov_tensor_t* tensor) {
+    if (!infer_request || !tensor) {
+        return ov_status_e::GENERAL_ERROR;
+    }
+
+    try {
+        infer_request->object->set_input_tensor(idx, *tensor->object);
+    } CATCH_OV_EXCEPTIONS
+
+    return ov_status_e::OK;
+}
+
 ov_status_e ov_infer_request_get_tensor(const ov_infer_request_t* infer_request,
                                 const char* tensor_name, ov_tensor_t **tensor) {
     if (!infer_request || !tensor_name || !tensor) {
@@ -1004,6 +1091,21 @@ ov_status_e ov_infer_request_get_tensor(const ov_infer_request_t* infer_request,
     try {
         *tensor = new ov_tensor_t;
         ov::Tensor tensor_get = infer_request->object->get_tensor(tensor_name);
+        (*tensor)->object = std::make_shared<ov::Tensor>(std::move(tensor_get));
+    } CATCH_OV_EXCEPTIONS
+
+    return ov_status_e::OK;
+}
+
+ov_status_e ov_infer_request_get_out_tensor(const ov_infer_request_t* infer_request,
+                                size_t idx, ov_tensor_t **tensor) {
+    if (!infer_request || !tensor) {
+        return ov_status_e::GENERAL_ERROR;
+    }
+
+    try {
+        *tensor = new ov_tensor_t;
+        ov::Tensor tensor_get = infer_request->object->get_output_tensor(idx);
         (*tensor)->object = std::make_shared<ov::Tensor>(std::move(tensor_get));
     } CATCH_OV_EXCEPTIONS
 
@@ -1053,7 +1155,7 @@ ov_status_e ov_infer_request_set_callback(ov_infer_request_t* infer_request,
     }
 
     try {
-        auto func = [&](std::exception_ptr ex) {
+        auto func = [=](std::exception_ptr ex) {
             callback->callback_func(callback->args);
         };
         infer_request->object->set_callback(func);
@@ -1203,6 +1305,6 @@ ov_status_e ov_tensor_get_data(const ov_tensor_t* tensor, void** data) {
     return ov_status_e::OK;
 }
 
-void ov_tensor_free(const ov_tensor_t* tensor) {
+void ov_tensor_free(ov_tensor_t* tensor) {
     delete tensor;
 }

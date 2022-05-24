@@ -24,7 +24,7 @@
 
 #include <stdint.h>
 #include <stdio.h>
-
+#include <stdbool.h>
 #ifdef __cplusplus
     #define OPENVINO_C_API_EXTERN extern "C"
 #else
@@ -174,7 +174,7 @@ typedef struct ov_output_node ov_output_node_t;
  * @struct ov_output_node_list_t
  */
 typedef struct{
-    ov_output_node *output_nodes;
+    ov_output_node_t *output_nodes;
     size_t num;
 } ov_output_node_list_t;
 
@@ -218,11 +218,11 @@ typedef struct ov_preprocess_input_model_info ov_preprocess_input_model_info_t;
  */
 typedef struct ov_preprocess_input_process_steps ov_preprocess_input_process_steps_t;
 
-enum ov_preprocess_resize_algorithm_e {
+typedef enum {
     RESIZE_LINEAR,
     RESIZE_CUBIC,
     RESIZE_NEAREST
-};
+} ov_preprocess_resize_algorithm_e;
 
 /**
  * @struct ov_compiled_model_t
@@ -242,7 +242,7 @@ typedef struct ov_tensor ov_tensor_t;
 /**
  * @struct ov_element_type_e
  */
-enum ov_element_type_e {
+typedef enum {
     UNDEFINED = 0,  //!< Undefined element type
     DYNAMIC,    //!< Dynamic element type
     BOOLEAN,    //!< boolean element type
@@ -261,7 +261,7 @@ enum ov_element_type_e {
     U16,        //!< u16 element type
     U32,        //!< u32 element type
     U64         //!< u64 element type
-};
+} ov_element_type_e;
 
 /**
  * @struct ov_layout_t
@@ -276,19 +276,19 @@ typedef size_t ov_shape_t[4];
 /**
  * @struct ov_PartialShape_t
  */
-typedef char* ov_partial_shape_t[4];
+typedef const char* ov_partial_shape_t[4];
 
 /**
  * @enum ov_performance_mode_e
  * @brief Enum to define possible performance mode hints
  * @brief This represents OpenVINO 2.0 ov::hint::PerformanceMode entity.
  */
-enum ov_performance_mode_e {
+typedef enum {
     UNDEFINED_MODE = -1,             //!<  Undefined value, performance setting may vary from device to device
     LATENCY = 1,                //!<  Optimize for latency
     THROUGHPUT = 2,             //!<  Optimize for throughput
     CUMULATIVE_THROUGHPUT = 3,  //!< Optimize for cumulative throughput
-};
+} ov_performance_mode_e;
 
 /**
  * @struct ov_available_devices_t
@@ -325,14 +325,14 @@ typedef enum {
 
 typedef union {
     uint32_t value_u;
-    char value_s[256];
+    char value_s[320];
     ov_performance_mode_e value_performance_mode;
 }ov_property_value;
 
 typedef struct ov_property{
     ov_property_key_e key;
     ov_property_value value;
-    ov_property* next;
+    struct ov_property* next;
 }ov_property_t;
 
 /**
@@ -381,7 +381,7 @@ OPENVINO_C_API(ov_status_e) ov_core_read_model(const ov_core_t *core,
 /**
  * @brief Reads models from IR/ONNX/PDPD formats.
  * @param core A pointer to the ie_core_t instance.
- * @param model_path String with a model in IR/ONNX/PDPD format.
+ * @param model_str String with a model in IR/ONNX/PDPD format.
  * @param weights Shared pointer to a constant tensor with weights.
  * @param model A pointer to the newly created model.
  * Reading ONNX/PDPD models does not support loading weights from the @p weights tensors.
@@ -391,7 +391,7 @@ OPENVINO_C_API(ov_status_e) ov_core_read_model(const ov_core_t *core,
  * @return Status code of the operation: OK(0) for success.
  */
 OPENVINO_C_API(ov_status_e) ov_core_read_model_from_memory(const ov_core_t *core,
-                                                        const char *model_path,
+                                                        const char *model_str,
                                                         const ov_tensor_t *weights,
                                                         ov_model_t **model);
 
@@ -536,6 +536,33 @@ OPENVINO_C_API(ov_status_e) ov_model_get_outputs(const ov_model_t* model, ov_out
 OPENVINO_C_API(ov_status_e) ov_model_get_inputs(const ov_model_t* model, ov_output_node_list_t *input_nodes);
 
 /**
+ * @brief Get the tensor name of ov_output_node.
+ * @param nodes A pointer to the ov_output_node_list_t.
+ * @param idx Index of the input tensor
+ * @param tensor_name A pointer to the tensor name.
+ * @return Status code of the operation: OK(0) for success.
+ */
+OPENVINO_C_API(ov_status_e) ov_node_get_tensor_name(ov_output_node_list_t *nodes, size_t idx, char** tensor_name);
+
+/**
+ * @brief Get the tensor shape of ov_output_node.
+ * @param nodes A pointer to the ov_output_node_list_t.
+ * @param idx Index of the input tensor
+ * @param tensor_shape tensor shape.
+ * @return Status code of the operation: OK(0) for success.
+ */
+OPENVINO_C_API(ov_status_e) ov_node_get_tensor_shape(ov_output_node_list_t *nodes, size_t idx, ov_shape_t tensor_shape);
+
+/**
+ * @brief Get the tensor type of ov_output_node.
+ * @param nodes A pointer to the ov_output_node_list_t.
+ * @param idx Index of the input tensor
+ * @param tensor_type tensor type.
+ * @return Status code of the operation: OK(0) for success.
+ */
+OPENVINO_C_API(ov_status_e) ov_node_get_tensor_type(ov_output_node_list_t *nodes, size_t idx, ov_element_type_e *tensor_type);
+
+/**
  * @brief Get the outputs of ov_model_t.
  * @param model A pointer to the ov_model_t.
  * @param tensor_name input tensor name (char *).
@@ -578,13 +605,25 @@ OPENVINO_C_API(ov_status_e) ov_model_reshape(const ov_model_t* model,
  * @param model A pointer to the ov_model_t.
  * @param friendly_name the model's friendly name.
  */
-OPENVINO_C_API(ov_status_e) ov_model_get_friendly_name(const ov_model_t* model, char **friendly_name);
+OPENVINO_C_API(ov_status_e) ov_model_get_friendly_name(const ov_model_t* model, char** friendly_name);
 
 /**
  * @brief free ov_output_node_list_t
  * @param output_nodes The pointer to the instance of the ov_output_node_list_t to free.
  */
-OPENVINO_C_API(void) ov_output_nodes_free(ov_output_node_list_t *output_nodes);
+OPENVINO_C_API(void) ov_output_node_list_free(ov_output_node_list_t *output_nodes);
+
+/**
+ * @brief free ov_output_node_t
+ * @param output_node The pointer to the instance of the ov_output_node_t to free.
+ */
+OPENVINO_C_API(void) ov_output_node_free(ov_output_node_t *output_node);
+
+/**
+ * @brief free char
+ * @param content The pointer to the tensor name to free.
+ */
+OPENVINO_C_API(void) ov_name_free(char *content);
 
 /**
  * @brief Create a ov_preprocess_t instance. 
@@ -848,7 +887,7 @@ OPENVINO_C_API(ov_status_e) ov_compiled_model_set_property(const ov_compiled_mod
 /**
  * @brief Gets properties for current compiled model.
  * @param compiled_model A pointer to the ov_compiled_model_t.
- * @param property_name  Property name.
+ * @param property_name Property name.
  * @param property_value A pointer to property value.
  * @return Status code of the operation: OK(0) for success.
  */
@@ -856,6 +895,15 @@ OPENVINO_C_API(ov_status_e) ov_compiled_model_get_property(const ov_compiled_mod
                                 const ov_property_key_e property_name,
                                 ov_property_value* property_value);
 
+/**
+ * @brief Exports the current compiled model to an output stream `std::ostream`.
+ * The exported model can also be imported via the ov::Core::import_model method.
+ * @param compiled_model A pointer to the ov_compiled_model_t.
+ * @param export_model_path Path to the file.
+ * @return Status code of the operation: OK(0) for success.
+ */
+OPENVINO_C_API(ov_status_e) ov_compiled_model_export(const ov_compiled_model_t* compiled_model,
+                                const char* export_model_path);
 /**
  * @brief Sets an input/output tensor to infer on.
  * @param infer_request A pointer to the ov_infer_request_t.
@@ -867,6 +915,16 @@ OPENVINO_C_API(ov_status_e) ov_infer_request_set_tensor(ov_infer_request_t* infe
                                 const char* tensor_name, const ov_tensor_t* tensor);
 
 /**
+ * @brief Sets an input tensor to infer on.
+ * @param infer_request A pointer to the ov_infer_request_t.
+ * @param idx Index of the input tensor. If @p idx is greater than the number of model inputs, an exception is thrown.
+ * @param tensor Reference to the tensor.
+ * @return Status code of the operation: OK(0) for success.
+ */
+OPENVINO_C_API(ov_status_e) ov_infer_request_set_input_tensor(ov_infer_request_t* infer_request,
+                                size_t idx, const ov_tensor_t* tensor);
+
+/**
  * @brief Gets an input/output tensor to infer on.
  * @param infer_request A pointer to the ov_infer_request_t.
  * @param tensor_name  Name of the input or output tensor.
@@ -875,6 +933,16 @@ OPENVINO_C_API(ov_status_e) ov_infer_request_set_tensor(ov_infer_request_t* infe
  */
 OPENVINO_C_API(ov_status_e) ov_infer_request_get_tensor(const ov_infer_request_t* infer_request,
                                 const char* tensor_name, ov_tensor_t **tensor);
+
+/**
+ * @brief Gets an output tensor to infer on.
+ * @param infer_request A pointer to the ov_infer_request_t.
+ * @param idx Index of the tensor to get.
+ * @param tensor Reference to the tensor.
+ * @return Status code of the operation: OK(0) for success.
+ */
+OPENVINO_C_API(ov_status_e) ov_infer_request_get_out_tensor(const ov_infer_request_t* infer_request,
+                                size_t idx, ov_tensor_t **tensor);
 
 /**
  * @brief Infers specified input(s) in synchronous mode.
@@ -993,6 +1061,6 @@ OPENVINO_C_API(ov_status_e) ov_tensor_get_data(const ov_tensor_t* tensor, void *
  * @brief Free ov_tensor_t.
  * @param tensor A point to ov_tensor_t
  */
-OPENVINO_C_API(void) ov_tensor_free(const ov_tensor_t* tensor);
+OPENVINO_C_API(void) ov_tensor_free(ov_tensor_t* tensor);
 
 #endif  // OV_C_API_H
