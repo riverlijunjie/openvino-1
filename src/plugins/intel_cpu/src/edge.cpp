@@ -278,7 +278,7 @@ void MKLDNNEdge::allocateCommon(const std::function<void(const MKLDNNMemoryPtr&,
 }
 
 void MKLDNNEdge::allocate(const void* mem_ptr) {
-    auto allocateFunc = [&](const MKLDNNMemoryPtr& memoryPtr, const MemoryDesc& inputDesc) {
+    auto allocateFunc = [=](const MKLDNNMemoryPtr& memoryPtr, const MemoryDesc& inputDesc) {
         memoryPtr->Create(inputDesc, mem_ptr, false);  // no pads zeroing
     };
 
@@ -290,7 +290,7 @@ void MKLDNNEdge::allocate(DnnlMemoryMngrPtr memMngr) {
         IE_THROW(Unexpected) << "Memory manager ptr is NULL";
     }
 
-    auto allocateFunc = [&](const MKLDNNMemoryPtr& memoryPtr, const MemoryDesc& inputDesc) {
+    auto allocateFunc = [=](const MKLDNNMemoryPtr& memoryPtr, const MemoryDesc& inputDesc) {
         memoryPtr->Create(inputDesc, memMngr);
     };
 
