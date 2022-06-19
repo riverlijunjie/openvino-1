@@ -75,8 +75,8 @@ TEST_F(CoreThreadingTests, SetConfigPluginDoesNotExist) {
     }, 10000);
 }
 
-// TODO: CVS-68982
 #ifndef OPENVINO_STATIC_LIBRARY
+// TODO: CVS-68982
 
 // tested function: RegisterPlugin
 TEST_F(CoreThreadingTests, RegisterPlugin) {
