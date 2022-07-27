@@ -99,7 +99,7 @@ InferenceEngine::Blob::Ptr MemoryDescUtils::interpretAsBlob(const MKLDNNMemory &
     return make_blob_with_precision(desc, mem.GetData());
 }
 
-InferenceEngine::TensorDesc MemoryDescUtils::interpretAsBlobDesc(const Memory &mem) {
+InferenceEngine::TensorDesc MemoryDescUtils::interpretAsBlobDesc(const MKLDNNMemory &mem) {
     auto& memDesc = mem.getDesc();
     InferenceEngine::TensorDesc desc = convertToTensorDesc(memDesc);
 

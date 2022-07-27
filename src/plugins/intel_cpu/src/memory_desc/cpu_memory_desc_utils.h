@@ -71,7 +71,7 @@ public:
      * @param desc Memory from which will be created InferenceEngine::Blob
      * @return InferenceEngine::TensorDesc
      */
-    static InferenceEngine::TensorDesc interpretAsBlobDesc(const Memory& mem);
+    static InferenceEngine::TensorDesc interpretAsBlobDesc(const MKLDNNMemory& mem);
 
     /**
      * @brief Converts MemoryDesc to InferenceEngine::TensorDesc
