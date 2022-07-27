@@ -183,6 +183,13 @@ class CoreImpl : public ie::ICore, public std::enable_shared_from_this<ie::ICore
                 executorManager()->setTbbFlag(flag);
                 config.erase(it);
             }
+
+            it = config.find(ov::force_tbb_terminate.name());
+            if (it != config.end()) {
+                auto flag = it->second == CONFIG_VALUE(YES) ? true : false;
+                executorManager()->setTbbFlag(flag);
+                config.erase(it);
+            }
         }
 
         void setCacheForDevice(const std::string& dir, const std::string& name) {
