@@ -5,13 +5,13 @@
 
 #include "common.h"
 
-ov_status_e ov_const_node_get_shape(ov_output_const_node_t* node, ov_shape_t* tensor_shape) {
+ov_status_e ov_const_node_get_shape(ov_output_const_node_t* port, ov_shape_t* tensor_shape) {
     if (!node || !tensor_shape) {
         return ov_status_e::INVALID_C_PARAM;
     }
 
     try {
-        auto shape = node->object->get_shape();
+        auto shape = port->object->get_shape();
         ov_shape_init(tensor_shape, shape.size());
         std::copy_n(shape.begin(), shape.size(), tensor_shape->dims);
     }
@@ -20,13 +20,13 @@ ov_status_e ov_const_node_get_shape(ov_output_const_node_t* node, ov_shape_t* te
     return ov_status_e::OK;
 }
 
-ov_status_e ov_node_get_shape(ov_output_node_t* node, ov_shape_t* tensor_shape) {
+ov_status_e ov_node_get_shape(ov_output_node_t* port, ov_shape_t* tensor_shape) {
     if (!node || !tensor_shape) {
         return ov_status_e::INVALID_C_PARAM;
     }
 
     try {
-        auto shape = node->object->get_shape();
+        auto shape = port->object->get_shape();
         ov_shape_init(tensor_shape, shape.size());
         std::copy_n(shape.begin(), shape.size(), tensor_shape->dims);
     }
@@ -35,13 +35,13 @@ ov_status_e ov_node_get_shape(ov_output_node_t* node, ov_shape_t* tensor_shape) 
     return ov_status_e::OK;
 }
 
-ov_status_e ov_node_list_get_shape_by_index(ov_output_node_list_t* nodes, size_t idx, ov_shape_t* tensor_shape) {
-    if (!nodes || idx >= nodes->size || !tensor_shape) {
+ov_status_e ov_node_list_get_shape_by_index(ov_output_node_list_t* port_list, size_t idx, ov_shape_t* tensor_shape) {
+    if (!nodes || idx >= port_list->size || !tensor_shape) {
         return ov_status_e::INVALID_C_PARAM;
     }
 
     try {
-        auto shape = nodes->output_nodes[idx].object->get_shape();
+        auto shape = port_list->output_nodes[idx].object->get_shape();
         ov_shape_init(tensor_shape, shape.size());
         std::copy_n(shape.begin(), shape.size(), tensor_shape->dims);
     }
@@ -50,8 +50,8 @@ ov_status_e ov_node_list_get_shape_by_index(ov_output_node_list_t* nodes, size_t
     return ov_status_e::OK;
 }
 
-ov_status_e ov_node_list_get_any_name_by_index(ov_output_node_list_t* nodes, size_t idx, char** tensor_name) {
-    if (!nodes || !tensor_name || idx >= nodes->size) {
+ov_status_e ov_node_list_get_any_name_by_index(ov_output_node_list_t* port_list, size_t idx, char** tensor_name) {
+    if (!nodes || !tensor_name || idx >= port_list->size) {
         return ov_status_e::INVALID_C_PARAM;
     }
 
@@ -63,16 +63,16 @@ ov_status_e ov_node_list_get_any_name_by_index(ov_output_node_list_t* nodes, siz
     return ov_status_e::OK;
 }
 
-ov_status_e ov_node_list_get_partial_shape_by_index(ov_output_node_list_t* nodes,
+ov_status_e ov_node_list_get_partial_shape_by_index(ov_output_node_list_t* port_list,
                                                     size_t idx,
                                                     ov_partial_shape_t** partial_shape) {
-    if (!nodes || idx >= nodes->size || !partial_shape) {
+    if (!nodes || idx >= port_list->size || !partial_shape) {
         return ov_status_e::INVALID_C_PARAM;
     }
 
     try {
         std::unique_ptr<ov_partial_shape_t> _partial_shape(new ov_partial_shape_t);
-        auto shape = nodes->output_nodes[idx].object->get_partial_shape();
+        auto shape = port_list->output_nodes[idx].object->get_partial_shape();
 
         _partial_shape->rank = shape.rank();
         auto iter = shape.begin();
@@ -85,10 +85,10 @@ ov_status_e ov_node_list_get_partial_shape_by_index(ov_output_node_list_t* nodes
     return ov_status_e::OK;
 }
 
-ov_status_e ov_node_list_get_element_type_by_index(ov_output_node_list_t* nodes,
+ov_status_e ov_node_list_get_element_type_by_index(ov_output_node_list_t* port_list,
                                                    size_t idx,
                                                    ov_element_type_e* tensor_type) {
-    if (!nodes || idx >= nodes->size) {
+    if (!nodes || idx >= port_list->size) {
         return ov_status_e::INVALID_C_PARAM;
     }
 
