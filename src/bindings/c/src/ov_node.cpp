@@ -35,7 +35,6 @@ ov_status_e ov_node_get_shape(ov_output_node_t* node, ov_shape_t* tensor_shape) 
     return ov_status_e::OK;
 }
 
-
 ov_status_e ov_node_list_get_shape_by_index(ov_output_node_list_t* nodes, size_t idx, ov_shape_t* tensor_shape) {
     if (!nodes || idx >= nodes->size || !tensor_shape) {
         return ov_status_e::INVALID_C_PARAM;
