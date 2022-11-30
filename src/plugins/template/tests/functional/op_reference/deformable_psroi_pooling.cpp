@@ -198,7 +198,7 @@ std::vector<DeformablePSROIPoolingParams> generateDeformablePSROIPoolingFloatPar
         DeformablePSROIPoolingParams(1, 16, 2, 2, // batch_in, channel_in, height_in, width_in
                                      0.0625, 2, 1, 1, //spatial_scale, group_size, spatial_bins_x, spatial_bins_y
                                      1, 1, 2, // trans_std, part_size, rois_dim
-                                     IN_ET, true, 0, 0.0, //inputType, is_input_generation_iota, inputValue, offsetValue
+                                     IN_ET, true, 0, 0.0f, //inputType, is_input_generation_iota, inputValue, offsetValue
                                      std::vector<T>{
                                                     // input_batch_id, x1, y1, x2, y2
                                                     0, 1, 2, 4, 6,
@@ -216,9 +216,9 @@ std::vector<DeformablePSROIPoolingParams> generateDeformablePSROIPoolingFloatPar
                                                     48, 52, 56, 60},
                                                     "offset_00"),
         DeformablePSROIPoolingParams(1, 16, 2, 2, // batch_in, channel_in, height_in, width_in
-                                     0.0625, 2, 1, 1, //spatial_scale, group_size, spatial_bins_x, spatial_bins_y
+                                     0.0625f, 2, 1, 1, //spatial_scale, group_size, spatial_bins_x, spatial_bins_y
                                      1, 1, 2, // trans_std, part_size, rois_dim
-                                     IN_ET, true, 0, 0.2, //inputType, is_input_generation_iota, inputValue, offsetValue
+                                     IN_ET, true, 0, 0.2f, //inputType, is_input_generation_iota, inputValue, offsetValue
                                      std::vector<T>{
                                                     // input_batch_id, x1, y1, x2, y2
                                                     0, 1, 2, 4, 6,
@@ -236,7 +236,7 @@ std::vector<DeformablePSROIPoolingParams> generateDeformablePSROIPoolingFloatPar
                                                     48, 52, 56, 60},
                                                     "offset_0p2"),
         DeformablePSROIPoolingParams(1, 16, 2, 2, // batch_in, channel_in, height_in, width_in
-                                     0.0625, 2, 1, 1, //spatial_scale, group_size, spatial_bins_x, spatial_bins_y
+                                     0.0625f, 2, 1, 1, //spatial_scale, group_size, spatial_bins_x, spatial_bins_y
                                      1, 1, 2, // trans_std, part_size, rois_dim
                                      IN_ET, true, 0, 0.5, //inputType, is_input_generation_iota, inputValue, offsetValue
                                      std::vector<T>{
@@ -250,13 +250,13 @@ std::vector<DeformablePSROIPoolingParams> generateDeformablePSROIPoolingFloatPar
                                                     32, 36, 40, 44,
                                                     48, 52, 56, 60,
                                                     // Second ROI
-                                                    0, 4.1875, 8, 12.1875,
-                                                    16, 20.1875, 24, 28.1875,
-                                                    32, 36.1875, 40, 44.1875,
-                                                    48, 52.1875, 56, 60.1875},
+                                                    0, 4.1875f, 8, 12.1875f,
+                                                    16, 20.1875f, 24, 28.1875f,
+                                                    32, 36.1875f, 40, 44.1875f,
+                                                    48, 52.1875f, 56, 60.1875f},
                                                     "offset_0p5"),
         DeformablePSROIPoolingParams(1, 16, 2, 2, // batch_in, channel_in, height_in, width_in
-                                     0.0625, 2, 1, 1, //spatial_scale, group_size, spatial_bins_x, spatial_bins_y
+                                     0.0625f, 2, 1, 1, //spatial_scale, group_size, spatial_bins_x, spatial_bins_y
                                      1, 1, 2, // trans_std, part_size, rois_dim
                                      IN_ET, true, 0, 0, //inputType, is_input_generation_iota, inputValue, offsetValue
                                      std::vector<T>{
@@ -265,8 +265,8 @@ std::vector<DeformablePSROIPoolingParams> generateDeformablePSROIPoolingFloatPar
                                                     0, 100, 100, 200, 200},
                                      std::vector<T>{
                                                     // First ROI
-                                                    0.375,  4.71875,  9.0625,  13.40625, 16.375, 20.71875, 25.0625, 29.40625,
-                                                    32.375, 36.71875, 41.0625, 45.40625, 48.375, 52.71875, 57.0625, 61.40625,
+                                                    0.375f,  4.71875f,  9.0625f,  13.40625f, 16.375f, 20.71875f, 25.0625f, 29.40625f,
+                                                    32.375f, 36.71875f, 41.0625f, 45.40625f, 48.375f, 52.71875f, 57.0625f, 61.40625f,
                                                     // Second ROI
                                                     0,      0,        0,       0,        0,      0,        0,       0,
                                                     0,      0,        0,       0,        0,      0,        0,       0},
@@ -278,7 +278,7 @@ std::vector<DeformablePSROIPoolingParams> generateDeformablePSROIPoolingFloatPar
                                      std::vector<T>{
                                                     // input_batch_id, x1, y1, x2, y2
                                                     0, 1, 1, 2, 2},
-                                     std::vector<T>{2.0, 12.0, 23.0, 33.0, 38.0, 48.0, 59.0, 69.0},
+                                     std::vector<T>{2.0f, 12.0f, 23.0f, 33.0f, 38.0f, 48.0f, 59.0f, 69.0f},
                                                     "no_offset_input"),
         DeformablePSROIPoolingParams(1, 8, 3, 3, // batch_in, channel_in, height_in, width_in
                                      1, 2, 1, 1, //spatial_scale, group_size, spatial_bins_x, spatial_bins_y
@@ -287,7 +287,7 @@ std::vector<DeformablePSROIPoolingParams> generateDeformablePSROIPoolingFloatPar
                                      std::vector<T>{
                                                     // input_batch_id, x1, y1, x2, y2
                                                     0, 1, 1, 2, 2},
-                                     std::vector<T>{2.0, 12.0, 23.0, 33.0, 38.0, 48.0, 59.0, 69.0},
+                                     std::vector<T>{2.0f, 12.0f, 23.0f, 33.0f, 38.0f, 48.0f, 59.0f, 69.0f},
                                                     "offset_zero"),
         DeformablePSROIPoolingParams(1, 8, 3, 3, // batch_in, channel_in, height_in, width_in
                                      1, 2, 1, 1, //spatial_scale, group_size, spatial_bins_x, spatial_bins_y
@@ -296,38 +296,38 @@ std::vector<DeformablePSROIPoolingParams> generateDeformablePSROIPoolingFloatPar
                                      std::vector<T>{
                                                     // input_batch_id, x1, y1, x2, y2
                                                     0, 1, 1, 2, 2},
-                                     std::vector<T>{2.8, 12.8, 23.8, 33.8, 38.8, 48.8, 59.8, 69.8},
+                                     std::vector<T>{2.8f, 12.8f, 23.8f, 33.8f, 38.8f, 48.8f, 59.8f, 69.8f},
                                                     "offset_01"),
         DeformablePSROIPoolingParams(1, 8, 3, 3, // batch_in, channel_in, height_in, width_in
                                      1, 2, 1, 1, //spatial_scale, group_size, spatial_bins_x, spatial_bins_y
                                      1, 2, 1, // trans_std, part_size, rois_dim,
-                                     IN_ET, true, 0, 0.5, //inputType, is_input_generation_iota, inputValue, offsetValue
+                                     IN_ET, true, 0, 0.5f, //inputType, is_input_generation_iota, inputValue, offsetValue
                                      std::vector<T>{
                                                     // input_batch_id, x1, y1, x2, y2
                                                     0, 1, 1, 2, 2},
-                                     std::vector<T>{6., 15.5, 25.5, 35., 42., 51.5, 61.5, 71.},
+                                     std::vector<T>{6.f, 15.5f, 25.5f, 35.f, 42.f, 51.5f, 61.5f, 71.f},
                                                     "offset_05"),
         DeformablePSROIPoolingParams(1, 16, 2, 2, // batch_in, channel_in, height_in, width_in
-                                     0.0625, 2, 1, 1, //spatial_scale, group_size, spatial_bins_x, spatial_bins_y
+                                     0.0625f, 2, 1, 1, //spatial_scale, group_size, spatial_bins_x, spatial_bins_y
                                      1, 1, 1, // trans_std, part_size, rois_dim,
                                      IN_ET, false, 0.1, 0.1, //inputType, is_input_generation_iota, inputValue, offsetValue
                                      std::vector<T>{
                                                     // input_batch_id, x1, y1, x2, y2
                                                     0, 10, 10, 10, 10},
-                                     std::vector<T>{0.1, 0.1, 0.1, 0.1,
-                                                    0.1, 0.1, 0.1, 0.1,
-                                                    0.1, 0.1, 0.1, 0.1,
-                                                    0.1, 0.1, 0.1, 0.1},
+                                     std::vector<T>{0.1f, 0.1f, 0.1f, 0.1f,
+                                                    0.1f, 0.1f, 0.1f, 0.1f,
+                                                    0.1f, 0.1f, 0.1f, 0.1f,
+                                                    0.1f, 0.1f, 0.1f, 0.1f},
                                                     "single_value"),
         DeformablePSROIPoolingParams(1, 1024, 63, 38, // batch_in, channel_in, height_in, width_in
-                                     0.0625, 3, 1, 1, //spatial_scale, group_size, spatial_bins_x, spatial_bins_y
+                                     0.0625f, 3, 1, 1, //spatial_scale, group_size, spatial_bins_x, spatial_bins_y
                                      1, 1, 2, // trans_std, part_size, rois_dim,
-                                     IN_ET, false, 0.1, 0.0, //inputType, is_input_generation_iota, inputValue, offsetValue
+                                     IN_ET, false, 0.1f, 0.0f, //inputType, is_input_generation_iota, inputValue, offsetValue
                                      std::vector<T>{
                                                     // input_batch_id, x1, y1, x2, y2
                                                     0, 1, 2, 4, 6,
                                                     0, 0, 3, 10, 4},
-                                     std::vector<T>{0.1},
+                                     std::vector<T>{0.1f},
                                                     "single_value_big_shape")
     };
     return deformablePSROIPoolingParams;

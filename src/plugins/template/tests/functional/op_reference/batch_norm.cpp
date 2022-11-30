@@ -200,7 +200,7 @@ std::vector<BatchNormParams> generateParamsForBatchNorm() {
                         std::vector<T>{1.0, 1.0},
                         std::vector<T>{1.0, 1.0},
                         std::vector<T>{1.0, 1.0},
-                        0.001),
+                        0.001f),
         BatchNormParams(Shape{2, 2, 2, 1},
                         Shape{2, 2, 2, 1},
                         ET,
@@ -225,7 +225,7 @@ std::vector<BatchNormParams> generateParamsForBatchNorm() {
                         std::vector<T>{0.0f, 0.0f},
                         std::vector<T>{0.583388f, 0.619252f},
                         std::vector<T>{0.0119972f, 0.0282681f},
-                        0.001),
+                        0.001f),
     };
 
     return params;
