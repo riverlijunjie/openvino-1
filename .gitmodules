@@ -63,3 +63,6 @@
 	path = thirdparty/json/nlohmann_json
 	url = https://github.com/nlohmann/json.git
 	shallow = true
+[submodule "ARMComputeLibrary"]
+	path = src/plugins/intel_cpu/thirdparty/ComputeLibrary
+	url = https://github.com/ARM-software/ComputeLibrary.git

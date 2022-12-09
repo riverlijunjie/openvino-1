@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
+project(intel_cpu_thirdparty)
+
 if((CMAKE_CXX_COMPILER_ID STREQUAL "MSVC") AND (MSVC_VERSION VERSION_GREATER_EQUAL "1910"))
     # 1910 version of Visual Studio 2017
     # This flagis needed for enabling SIMD vectorization with command '#pragma omp simd'.
@@ -52,7 +54,7 @@ function(ie_add_onednn)
         set(DNNL_TARGET_ARCH "X64" CACHE STRING "" FORCE)
     elseif(AARCH64)
         set(DNNL_TARGET_ARCH "AARCH64" CACHE STRING "" FORCE)
-        set(DNNL_AARCH64_USE_ACL OFF CACHE BOOL "" FORCE)
+        set(DNNL_AARCH64_USE_ACL ON CACHE BOOL "" FORCE)
         # TODO: fix warning
         if(CMAKE_COMPILER_IS_GNUCXX OR OV_COMPILER_IS_CLANG)
             ie_add_compiler_flags(-Wno-macro-redefined)
@@ -93,6 +95,10 @@ function(ie_add_onednn)
         # C4334 '<<': result of 32-bit shift implicitly converted to 64 bits
         ie_add_compiler_flags(/wd4334)
     endif()
+    
+    # to find our FindACL.cmake
+    list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}")
+
     add_subdirectory(onednn EXCLUDE_FROM_ALL)
     ov_install_static_lib(dnnl cpu)
 endfunction()
