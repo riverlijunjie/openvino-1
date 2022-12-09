@@ -45,6 +45,7 @@ struct Config {
     // Currently INT8 mode is not optimized on ARM, fallback to FP32 mode.
     LPTransformsMode lpTransformsMode = LPTransformsMode::Off;
     bool enforceBF16 = false;
+    bool manualEnforceBF16 = false;
 #else
     LPTransformsMode lpTransformsMode = LPTransformsMode::On;
     bool enforceBF16 = true;

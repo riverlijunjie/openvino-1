@@ -4,7 +4,9 @@
 
 #pragma once
 
-#include <immintrin.h>
+#if defined(__x86_64__) || defined(_M_X64)
+#   include <immintrin.h>
+#endif
 
 namespace ov {
 namespace intel_cpu {
