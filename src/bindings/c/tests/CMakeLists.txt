@@ -38,7 +38,7 @@ install(TARGETS ${TARGET_NAME}
     COMPONENT tests
     EXCLUDE_FROM_ALL)
 
-# OpenVINO 2.0 and Legacy C API test sample
+# OpenVINO 2.0 C API test sample
 set(TARGET_NAME "ov_capi_test")
 
 file(GLOB SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/ov_*.cpp)
@@ -113,7 +113,7 @@ if(ENABLE_INTEL_GPU)
     add_dependencies(${TARGET_NAME} openvino_intel_gpu_plugin)
 endif()
 
-add_clang_format_target(${TARGET_NAME}_clang FOR_TARGETS ${TARGET_NAME})
+add_clang_format_target(${TARGET_NAME}_clang FOR_SOURCES ${SOURCES} ${HEADER})
 
 install(TARGETS ${TARGET_NAME}
     RUNTIME DESTINATION tests
