@@ -8,7 +8,7 @@ set(TARGET_NAME ov_cpu_func_tests)
 # is a specific version for debugging purpose, just set DEBUG_SRC_PATH
 # to the test case to be debugged and debug using cpuDebugFuncTests
 set(DEBUG_TARGET_NAME cpuDebugFuncTests)
-set(DEBUG_SRC_PATH ${CMAKE_CURRENT_SOURCE_DIR}/subgraph_tests/src/conv_sum_broadcast.cpp)
+set(DEBUG_SRC_PATH ${CMAKE_CURRENT_SOURCE_DIR}/single_layer_tests/mvn.cpp)
 
 add_library(cpuSpecificRtInfo STATIC $<TARGET_PROPERTY:openvino_intel_cpu_plugin,SOURCE_DIR>/src/utils/rt_info/memory_formats_attribute.hpp
                                      $<TARGET_PROPERTY:openvino_intel_cpu_plugin,SOURCE_DIR>/src/utils/rt_info/memory_formats_attribute.cpp)
@@ -23,18 +23,18 @@ else()
     set(EXCLUDED_SOURCE_PATHS ${CMAKE_CURRENT_SOURCE_DIR}/extension ${CMAKE_CURRENT_SOURCE_DIR}/onnx)
 endif()
 
-addIeTargetTest(
-        NAME ${TARGET_NAME}
-        ROOT ${CMAKE_CURRENT_SOURCE_DIR}
-        INCLUDES ${INCLUDES}
-        EXCLUDED_SOURCE_PATHS ${EXCLUDED_SOURCE_PATHS}
-        DEFINES ${DEFINES}
-        DEPENDENCIES ${DEPENDENCIES}
-        LINK_LIBRARIES ${LINK_LIBRARIES}
-        ADD_CPPLINT
-        LABELS
-            CPU
-)
+# addIeTargetTest(
+#         NAME ${TARGET_NAME}
+#         ROOT ${CMAKE_CURRENT_SOURCE_DIR}
+#         INCLUDES ${INCLUDES}
+#         EXCLUDED_SOURCE_PATHS ${EXCLUDED_SOURCE_PATHS}
+#         DEFINES ${DEFINES}
+#         DEPENDENCIES ${DEPENDENCIES}
+#         LINK_LIBRARIES ${LINK_LIBRARIES}
+#         ADD_CPPLINT
+#         LABELS
+#             CPU
+# )
 
 
 # remove all non-common files from debug
@@ -69,5 +69,5 @@ addIeTargetTest(
             CPU
 )
 
-set_ie_threading_interface_for(${TARGET_NAME})
+# set_ie_threading_interface_for(${TARGET_NAME})
 set_ie_threading_interface_for(${DEBUG_TARGET_NAME})
