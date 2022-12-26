@@ -16,13 +16,19 @@ public:
     bool init(const MVNAttrs& mvnAttrs,
               const std::vector<MemoryDescCPtr>& srcDescs,
               const std::vector<MemoryDescCPtr>& dstDescs,
-              const dnnl_primitive_attr &attr) override;
+              const dnnl::primitive_attr &attr) override;
     void exec(const std::vector<MemoryCPtr>& src,
               const std::vector<MemoryPtr>& dst,
               const void *post_ops_data_) override;
 
+    impl_desc_type getImplType() const override {
+        return implType;
+    }
+
 private:
     void mvn_ref(const uint8_t *in_ptr_, uint8_t *out_ptr_);
+
+    impl_desc_type implType = impl_desc_type::ref;
 };
 
 class RefMVNExecutorBuilder : public MVNExecutorBuilder {

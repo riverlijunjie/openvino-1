@@ -38,52 +38,6 @@ namespace intel_cpu {
 namespace node {
 namespace {
 
-struct MVNKey {
-    MVNAttrs mvnAttrs;
-    dnnl::primitive_attr attr;
-
-    size_t hash() const;
-    bool operator==(const MVNKey& rhs) const;
-};
-
-size_t MVNKey::hash() const {
-    using namespace dnnl::impl;
-    using namespace dnnl::impl::primitive_hashing;
-
-    size_t seed = 0;
-
-    // seed = hash_combine(seed, std::get<0>(mvnAttrs.shape5D));
-    // seed = hash_combine(seed, std::get<1>(mvnAttrs.shape5D));
-    // seed = hash_combine(seed, std::get<2>(mvnAttrs.shape5D));
-    // seed = hash_combine(seed, std::get<3>(mvnAttrs.shape5D));
-    // seed = hash_combine(seed, std::get<4>(mvnAttrs.shape5D));
-    seed = hash_combine(seed, mvnAttrs.initAcrossChannels_);
-    // seed = hash_combine(seed, mvnAttrs.execAcrossChannels_);
-    seed = hash_combine(seed, mvnAttrs.normalizeVariance_);
-    seed = hash_combine(seed, mvnAttrs.epsValue_);
-    seed = hash_combine(seed, mvnAttrs.epsMode_);
-    // seed = hash_combine(seed, mvnAttrs.src_prc.getPrecVal());
-    // seed = hash_combine(seed, mvnAttrs.dst_prc.getPrecVal());
-    // seed = hash_combine(seed, mvnAttrs.layout);
-    seed = hash_combine(seed, get_attr_hash(*attr.get()));
-    return seed;
-}
-
-bool MVNKey::operator==(const MVNKey& rhs) const {
-    bool retVal = true;
-    retVal = retVal &&
-            // vnAttrs.shape5D == rhs.mvnAttrs.shape5D &&
-             mvnAttrs.initAcrossChannels_ == rhs.mvnAttrs.initAcrossChannels_ &&
-            //  mvnAttrs.execAcrossChannels_ == rhs.mvnAttrs.execAcrossChannels_ &&
-             mvnAttrs.normalizeVariance_ == rhs.mvnAttrs.normalizeVariance_ &&
-             mvnAttrs.epsValue_ == rhs.mvnAttrs.epsValue_ &&
-             mvnAttrs.epsMode_ == rhs.mvnAttrs.epsMode_;
-            //  mvnAttrs.src_prc == rhs.mvnAttrs.src_prc &&
-            //  mvnAttrs.dst_prc == rhs.mvnAttrs.dst_prc &&
-            //  mvnAttrs.layout == rhs.mvnAttrs.layout;
-    retVal = retVal && *attr.get() == *rhs.attr.get();
-    return retVal;
-}
 } // namespace
 
 bool MVN::isSupportedOperation(const std::shared_ptr<const ngraph::Node>& op, std::string& errorMessage) noexcept {
@@ -233,9 +187,10 @@ void MVN::initSupportedPrimitiveDescriptors() {
         for (int i = 0; i < config.outConfs.size(); i++) {
             dstMemoryDescs.push_back(config.outConfs[i].getMemDesc());
         }
-        auto factory = MVNExecutorFactory(mvnAttrs, srcMemoryDescs, dstMemoryDescs);
 
-        supportedPrimitiveDescriptors.push_back({config, impl_desc_type::undef});
+        auto factory = std::make_shared<MVNExecutorFactory>(mvnAttrs, srcMemoryDescs, dstMemoryDescs);
+        factory->setRuntimeCache(getRuntimeCache());
+        supportedPrimitiveDescriptors.push_back({config, impl_desc_type::undef, factory});
     };
 
     if (mayiuse(cpu::x64::sse41)) {
@@ -268,10 +223,29 @@ void MVN::prepareParams() {
     if (getSelectedPrimitiveDescriptor() == nullptr)
         IE_THROW() << "Preferable primitive descriptor is not set.";
 
-    // const SizeVector in_dims = srcMemPtr->getStaticDims();
-    // transformTo5DCase(in_dims);
+    std::vector<MemoryDescCPtr> srcMemoryDescs;
+    for (int i = 0; i < getOriginalInputsNumber(); i++) {
+        srcMemoryDescs.push_back(getParentEdgeAt(i)->getMemoryPtr()->getDescPtr());
+    }
+    std::vector<MemoryDescCPtr> dstMemoryDescs;
+    for (int i = 0; i < getOriginalOutputsNumber(); i++) {
+        dstMemoryDescs.push_back(getChildEdgeAt(i)->getMemoryPtr()->getDescPtr());
+    }
 
+    // std::vector<MemoryDescCPtr> srcMemoryDescs;
+    // for (int i = 0; i < selectedPD->getConfig().inConfs.size(); i++) {
+    //     srcMemoryDescs.push_back(selectedPD->getConfig().inConfs[i].getMemDesc());
+    // }
+    // std::vector<MemoryDescCPtr> dstMemoryDescs;
+    // for (int i = 0; i < selectedPD->getConfig().outConfs.size(); i++) {
+    //     dstMemoryDescs.push_back(selectedPD->getConfig().outConfs[i].getMemDesc());
+    // }
+
+    dnnl::primitive_attr attr;
+    setPostOps(attr, true);
     auto selectedPD = getSelectedPrimitiveDescriptor();
+    execPtr = selectedPD->getExecutorFactory()->makeExecutor(mvnAttrs, srcMemoryDescs, dstMemoryDescs, attr);
+    selectedPD->setImplementationType(execPtr->getImplType());
 
     // mvnAttrs.src_prc = selectedPD->getConfig().inConfs[0].getMemDesc()->getPrecision();
     // mvnAttrs.dst_prc = selectedPD->getConfig().outConfs[0].getMemDesc()->getPrecision();

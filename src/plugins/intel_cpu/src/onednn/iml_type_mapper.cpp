@@ -63,6 +63,7 @@ const char* impl_type_to_string(impl_desc_type type) {
 } while (0)
     CASE(unknown);
     CASE(undef);
+    CASE(ref);
     CASE(ref_any);
     CASE(reorder);
     CASE(gemm_any);

@@ -5,6 +5,7 @@
 #pragma once
 
 #include "cpu_memory.h"
+#include "onednn/iml_type_mapper.h"
 
 namespace ov {
 namespace intel_cpu {
@@ -28,10 +29,12 @@ public:
     virtual bool init(const MVNAttrs& mvnAttrs,
                       const std::vector<MemoryDescCPtr>& srcDescs,
                       const std::vector<MemoryDescCPtr>& dstDescs,
-                      const dnnl_primitive_attr &attr) = 0;
+                      const dnnl::primitive_attr &attr) = 0;
 
     virtual void exec(const std::vector<MemoryCPtr>& src, const std::vector<MemoryPtr>& dst, const void *post_ops_data_) = 0;
     virtual ~MVNExecutor() = default;
+
+    virtual impl_desc_type getImplType() const = 0;
 
     static InferenceEngine::SizeVector transformTo5DCase(const InferenceEngine::SizeVector& shape, bool initAcrossChannels);
 

@@ -38,6 +38,7 @@
 
 #include "dnnl_postops_composer.h"
 #include "graph_context.h"
+#include "nodes/executors/mvn_list.hpp"
 
 namespace ov {
 namespace intel_cpu {
@@ -76,6 +77,12 @@ class NodeDesc {
 public:
     NodeDesc(const NodeConfig& conf, impl_desc_type type): config(conf) {
         implementationType = type;
+        executorFactory = nullptr;
+    }
+
+    NodeDesc(const NodeConfig& conf, impl_desc_type type, MVNExecutorFactoryPtr factory): config(conf) {
+        implementationType = type;
+        executorFactory = factory;
     }
 
     const NodeConfig& getConfig() const {
@@ -94,9 +101,18 @@ public:
         implementationType = type;
     }
 
+    MVNExecutorFactoryPtr getExecutorFactory() const {
+        return executorFactory;
+    }
+
+    void setExecutorFactory(MVNExecutorFactoryPtr factory) {
+        executorFactory = factory;
+    }
+
 private:
     NodeConfig config;
     impl_desc_type implementationType;
+    MVNExecutorFactoryPtr executorFactory;
 };
 
 class Node {

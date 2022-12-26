@@ -561,12 +561,12 @@ template <cpu_isa_t isa>
 struct jit_uni_mvn_kernel_f32 : public jit_uni_mvn_kernel, public jit_generator {
     DECLARE_CPU_JIT_AUX_FUNCTIONS(jit_uni_mvn_kernel_f32)
 
-    explicit jit_uni_mvn_kernel_f32(jit_mvn_config_params jcp, const dnnl_primitive_attr &attr) : jit_uni_mvn_kernel(jcp, attr), jit_generator(jit_name()) {
-        const auto &p = attr_.post_ops_;
+    explicit jit_uni_mvn_kernel_f32(jit_mvn_config_params jcp, const dnnl::primitive_attr &attr) : jit_uni_mvn_kernel(jcp, attr), jit_generator(jit_name()) {
+        const auto &p = attr_.get_post_ops();
         bool opt_scaleshift_applicable = jcp_.layout == MVNLayoutType::mvn_by_channel && isa == cpu::x64::avx512_core && !jcp_.across_channels;
         if (opt_scaleshift_applicable) {
             for (int i = 0; i < p.len(); i++) {
-                auto &post_op = p.entry_[i];
+                auto &post_op = p.get()->entry_[i];
                 if (post_op.is_depthwise()) {
                     if (0 == i && post_op.depthwise.alg == alg_kind::depthwise_scale_shift) {
                         optimized_scaleshift_num = 1;
@@ -584,9 +584,9 @@ struct jit_uni_mvn_kernel_f32 : public jit_uni_mvn_kernel, public jit_generator 
     }
 
     void generate() override {
-        const auto &p = attr_.post_ops_;
+        const auto &p = attr_.get_post_ops();
         for (int i = 0; i < p.len(); i++) {
-            auto &post_op = p.entry_[i];
+            auto &post_op = p.get()->entry_[i];
             if (post_op.is_eltwise()) {
                 eltwise_injectors.push_back(std::make_shared<jit_uni_eltwise_injector_f32<isa>>(
                         this, post_op.eltwise.alg, post_op.eltwise.alpha, post_op.eltwise.beta, post_op.eltwise.scale));
@@ -846,7 +846,7 @@ private:
                     }
                 }
 
-                if (attr_.post_ops_.len() != 0) {
+                if (attr_.get_post_ops().len() != 0) {
                     for (int ur_size = 0; ur_size < unroll_size_rt; ur_size++) {
                         apply_post_ops(jcp_.dst_prc, ur_base + ur_size, false);
                         bool is_tails = ur_offset_elt + ur_size * vector_step + vector_step > jcp_.C;
@@ -885,7 +885,7 @@ private:
 
     inline void norm_nspc_ac_ker() {
         Xbyak::Reg64 reg_oc_off_bk = reg_src_stride;
-        if (attr_.post_ops_.len() != 0) {
+        if (attr_.get_post_ops().len() != 0) {
             mov(reg_oc_off_bk, reg_oc_off);
         }
 
@@ -898,7 +898,7 @@ private:
             cmp(reg_work_amount, 0);
             jle(loop_end_label, T_NEAR);
 
-            if (attr_.post_ops_.len() != 0) {
+            if (attr_.get_post_ops().len() != 0) {
                 mov(reg_oc_off, reg_oc_off_bk);
             }
 
@@ -908,12 +908,12 @@ private:
                 if (is_tail) {
                     add(reg_src, tail_step * jcp_.src_data_size);
                     add(reg_dst, tail_step * jcp_.dst_data_size);
-                    if (attr_.post_ops_.len() != 0)
+                    if (attr_.get_post_ops().len() != 0)
                         add(reg_oc_off, tail_step * sizeof(float));
                 } else {
                     add(reg_src, vector_step * jcp_.src_data_size);
                     add(reg_dst, vector_step * jcp_.dst_data_size);
-                    if (attr_.post_ops_.len() != 0)
+                    if (attr_.get_post_ops().len() != 0)
                         add(reg_oc_off, vector_step * sizeof(float));
                 }
             }
@@ -962,13 +962,13 @@ private:
     }
 
     void apply_post_ops(InferenceEngine::Precision dst_prc, size_t vmm_idx, bool is_broadcast) {
-        const auto &p = attr_.post_ops_;
+        const auto &p = attr_.get_post_ops();
         int eltwise_inj_idx = 0;
         int depthwise_inj_idx = 0;
         int quantization_inj_idx = 0;
         int post_ops_data_offset = 0;
         for (int i = 0; i < p.len(); i++) {
-            auto& post_op = p.entry_[i];
+            auto& post_op = p.get()->entry_[i];
             if (post_op.is_eltwise()) {
                 eltwise_injectors[eltwise_inj_idx]->compute_vector_range(vmm_idx, vmm_idx + 1);
                 eltwise_inj_idx++;
@@ -1012,7 +1012,9 @@ MVNJitExecutor::MVNJitExecutor() : MVNExecutor() {}
 bool MVNJitExecutor::init(const MVNAttrs& mvnAttrs,
                           const std::vector<MemoryDescCPtr>& srcDescs,
                           const std::vector<MemoryDescCPtr>& dstDescs,
-                          const dnnl_primitive_attr &attr) {
+                          const dnnl::primitive_attr &attr) {
+    // TODO: parameters validation
+
     this->mvnAttrs = mvnAttrs;
 
     jcp.src_prc = srcDescs[0]->getPrecision();
@@ -1049,6 +1051,7 @@ bool MVNJitExecutor::init(const MVNAttrs& mvnAttrs,
             jcp.normalize_variance = true;
             mvn_variance_kernel.reset(new jit_uni_mvn_mean_variance_kernel_f32<cpu::x64::avx512_core>(jcp));
         }
+        implType = impl_desc_type::jit_avx512;
     } else if (mayiuse(cpu::x64::avx2)) {
         mvn_kernel.reset(new jit_uni_mvn_kernel_f32<cpu::x64::avx2>(jcp, attr));
         jcp.normalize_variance = false;
@@ -1057,6 +1060,7 @@ bool MVNJitExecutor::init(const MVNAttrs& mvnAttrs,
             jcp.normalize_variance = true;
             mvn_variance_kernel.reset(new jit_uni_mvn_mean_variance_kernel_f32<cpu::x64::avx2>(jcp));
         }
+        implType = impl_desc_type::jit_avx2;
     } else if (mayiuse(cpu::x64::sse41)) {
         mvn_kernel.reset(new jit_uni_mvn_kernel_f32<cpu::x64::sse41>(jcp, attr));
         jcp.normalize_variance = false;
@@ -1065,8 +1069,9 @@ bool MVNJitExecutor::init(const MVNAttrs& mvnAttrs,
             jcp.normalize_variance = true;
             mvn_variance_kernel.reset(new jit_uni_mvn_mean_variance_kernel_f32<cpu::x64::sse41>(jcp));
         }
+        implType = impl_desc_type::jit_sse42;
     } else {
-        IE_THROW() << "Can't create jit MVN kernel";
+        return false;
     }
 
     if (mvn_kernel)
@@ -1562,6 +1567,51 @@ void MVNJitExecutor::mvn_blk(const uint8_t* src_data, uint8_t* dst_data, const v
             }
         }
     }
+}
+
+MVNJitExecutor::Key::Key(const MVNAttrs& mvnAttrs,
+                    const std::vector<MemoryDescCPtr>& srcDescs,
+                    const std::vector<MemoryDescCPtr>& dstDescs,
+                    const dnnl::primitive_attr &attr) {
+    auto blockedDesc = srcDescs[0]->as<BlockedMemoryDesc>();
+    this->mvnAttrs = mvnAttrs;
+    this->srcDims = blockedDesc->getShape().getStaticDims();
+    this->srcOrder = blockedDesc->getOrder();
+    this->srcPrc = srcDescs[0]->getPrecision();
+    this->dstPrc = dstDescs[0]->getPrecision();
+}
+
+size_t MVNJitExecutor::Key::hash() const {
+    using namespace dnnl::impl;
+    using namespace dnnl::impl::primitive_hashing;
+
+    size_t seed = 0;
+
+    seed = hash_combine(seed, mvnAttrs.initAcrossChannels_);
+    seed = hash_combine(seed, mvnAttrs.normalizeVariance_);
+    seed = hash_combine(seed, mvnAttrs.epsValue_);
+    seed = hash_combine(seed, mvnAttrs.epsMode_);
+    seed = get_vector_hash(seed, srcDims);
+    seed = get_vector_hash(seed, srcOrder);
+    seed = hash_combine(seed, srcPrc.getPrecVal());
+    seed = hash_combine(seed, dstPrc.getPrecVal());
+    seed = hash_combine(seed, get_attr_hash(*attr.get()));
+    return seed;
+}
+
+bool MVNJitExecutor::Key::operator==(const Key& rhs) const {
+    bool retVal = true;
+    retVal = retVal &&
+             mvnAttrs.initAcrossChannels_ == rhs.mvnAttrs.initAcrossChannels_ &&
+             mvnAttrs.normalizeVariance_ == rhs.mvnAttrs.normalizeVariance_ &&
+             mvnAttrs.epsValue_ == rhs.mvnAttrs.epsValue_ &&
+             mvnAttrs.epsMode_ == rhs.mvnAttrs.epsMode_ &&
+             srcDims == rhs.srcDims &&
+             srcOrder == rhs.srcOrder &&
+             srcPrc == rhs.srcPrc &&
+             dstPrc == rhs.dstPrc;
+    retVal = retVal && *attr.get() == *rhs.attr.get();
+    return retVal;
 }
 
 }   // namespace intel_cpu

@@ -63,13 +63,13 @@ struct jit_uni_mvn_kernel {
         ker_(args);
     }
 
-    explicit jit_uni_mvn_kernel(jit_mvn_config_params jcp, const dnnl_primitive_attr &attr) : ker_(nullptr), jcp_(jcp), attr_(attr) {}
+    explicit jit_uni_mvn_kernel(jit_mvn_config_params jcp, const dnnl::primitive_attr &attr) : ker_(nullptr), jcp_(jcp), attr_(attr) {}
     virtual ~jit_uni_mvn_kernel() {}
 
     virtual void create_ker() = 0;
 
     jit_mvn_config_params jcp_;
-    const dnnl_primitive_attr &attr_;
+    const dnnl::primitive_attr &attr_;
     int optimized_scaleshift_num = 0;
 };
 
@@ -80,8 +80,28 @@ public:
     bool init(const MVNAttrs& mvnAttrs,
               const std::vector<MemoryDescCPtr>& srcDescs,
               const std::vector<MemoryDescCPtr>& dstDescs,
-              const dnnl_primitive_attr &attr) override;
+              const dnnl::primitive_attr &attr) override;
     void exec(const std::vector<MemoryCPtr>& src, const std::vector<MemoryPtr>& dst, const void *post_ops_data_) override;
+
+    impl_desc_type getImplType() const override {
+        return implType;
+    }
+
+    struct Key {
+        MVNAttrs mvnAttrs;
+        VectorDims srcDims;
+        VectorDims srcOrder;
+        InferenceEngine::Precision srcPrc;
+        InferenceEngine::Precision dstPrc;
+        dnnl::primitive_attr attr;
+
+        Key(const MVNAttrs& mvnAttrs,
+            const std::vector<MemoryDescCPtr>& srcDescs,
+            const std::vector<MemoryDescCPtr>& dstDescs,
+            const dnnl::primitive_attr &attr);
+        size_t hash() const;
+        bool operator==(const Key& rhs) const;
+    };
 
 private:
     void mvn_pln(const uint8_t *in_ptr_, uint8_t *out_ptr_, const void *post_ops_data_);
@@ -93,6 +113,8 @@ private:
     std::shared_ptr<jit_uni_mvn_kernel> mvn_kernel;
 
     jit_mvn_config_params jcp;
+
+    impl_desc_type implType = impl_desc_type::jit_uni;
 };
 
 class JitMVNExecutorBuilder : public MVNExecutorBuilder {
