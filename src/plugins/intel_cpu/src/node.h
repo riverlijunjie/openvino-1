@@ -39,6 +39,7 @@
 #include "dnnl_postops_composer.h"
 #include "graph_context.h"
 #include "nodes/executors/mvn_list.hpp"
+#include "nodes/executors/executor.hpp"
 
 namespace ov {
 namespace intel_cpu {
@@ -80,7 +81,7 @@ public:
         executorFactory = nullptr;
     }
 
-    NodeDesc(const NodeConfig& conf, impl_desc_type type, MVNExecutorFactoryPtr factory): config(conf) {
+    NodeDesc(const NodeConfig& conf, impl_desc_type type, ExecutorFactoryPtr factory): config(conf) {
         implementationType = type;
         executorFactory = factory;
     }
@@ -101,18 +102,28 @@ public:
         implementationType = type;
     }
 
-    MVNExecutorFactoryPtr getExecutorFactory() const {
+    ExecutorFactoryPtr getExecutorFactory() const {
         return executorFactory;
     }
 
-    void setExecutorFactory(MVNExecutorFactoryPtr factory) {
+    template <typename T>
+            // typename std::enable_if<!std::is_pointer<T>::value && !std::is_reference<T>::value, int>::type = 0,
+            // typename std::enable_if<std::is_base_of<ExecutorFactory, T>::value, int>::type = 0>
+    std::shared_ptr<T> getExecutorFactoryAs() {
+        auto casted = std::dynamic_pointer_cast<T>(executorFactory);
+        if (!casted)
+            IE_THROW() << "Cannot dynamically cast ExecutorFactory";
+        return casted;
+    }
+
+    void setExecutorFactory(ExecutorFactoryPtr factory) {
         executorFactory = factory;
     }
 
 private:
     NodeConfig config;
     impl_desc_type implementationType;
-    MVNExecutorFactoryPtr executorFactory;
+    ExecutorFactoryPtr executorFactory;
 };
 
 class Node {

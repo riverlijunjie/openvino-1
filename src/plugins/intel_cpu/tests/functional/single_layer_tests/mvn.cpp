@@ -170,9 +170,9 @@ const std::vector<InputShape> inputShapes_2D = {
 };
 
 const std::vector<InputShape> inputShapes_3D = {
-    //    { {}, {{1, 32, 17}}},
-    //    { {}, {{1, 37, 9}}},
-    //    { {}, {{1, 16, 4}}},
+       { {}, {{1, 32, 17}}},
+       { {}, {{1, 37, 9}}},
+       { {}, {{1, 16, 4}}},
        {
            // dynamic
            {-1, -1, -1},

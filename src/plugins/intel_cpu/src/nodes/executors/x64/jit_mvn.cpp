@@ -1281,7 +1281,7 @@ void MVNJitExecutor::mvn_nspc(const uint8_t* src_data, uint8_t* dst_data, const 
                     arg.oc_off = 0;
                     arg.post_op_data = post_ops_data_;
                 }
-                arg.work_amount = (across_channel && kernel_type != 2) ? (end - start) * C : (end - start);
+                arg.work_amount = (across_channel && kernel_type != 2) ? (end - start) * jcp.C : (end - start);
 
                 if (0 == kernel_type) {
                     (*mvn_mean_kernel)(&arg);
@@ -1393,7 +1393,7 @@ void MVNJitExecutor::mvn_blk(const uint8_t* src_data, uint8_t* dst_data, const v
                 arg.oc_off = static_cast<size_t>(cb * blk_size * sizeof(float));  // for tail process
                 (*mvn_mean_kernel)(&arg); // for W * blk
 
-                size_t min_cb = (std::min)(blk_size, C - cb * blk_size);
+                size_t min_cb = (std::min)(blk_size, jcp.C - cb * blk_size);
                 for (int i = 0; i < min_cb; i++)
                     mean_internal += mean_buffer_ptr[i];
                 return mean_internal;
@@ -1488,10 +1488,10 @@ void MVNJitExecutor::mvn_blk(const uint8_t* src_data, uint8_t* dst_data, const v
             });
 
             for (size_t i = 1; i < threads_num; i++) {
-                for (size_t c = 0; c < C; c++)
+                for (size_t c = 0; c < jcp.C; c++)
                     mean_buffer[c] += mean_buffer[c + aux_buffer_size * i];
             }
-            for (size_t c = 0; c < C; c++)
+            for (size_t c = 0; c < jcp.C; c++)
                 mean_buffer[c] *= size_inv;
 
             if (mvnAttrs.normalizeVariance_) {
@@ -1516,10 +1516,10 @@ void MVNJitExecutor::mvn_blk(const uint8_t* src_data, uint8_t* dst_data, const v
                     }
                 });
                 for (size_t i = 1; i < threads_num; i++) {
-                    for (size_t c = 0; c < C; c++)
+                    for (size_t c = 0; c < jcp.C; c++)
                         variance_buffer[c] += variance_buffer[c + aux_buffer_size * i];
                 }
-                for (size_t c = 0; c < C; c++) {
+                for (size_t c = 0; c < jcp.C; c++) {
                     if (mvnAttrs.epsMode_ == INSIDE_SQRT)
                         variance_buffer[c] = 1.f / sqrtf(variance_buffer[c] * size_inv + mvnAttrs.epsValue_);
                     else if (mvnAttrs.epsMode_ == OUTSIDE_SQRT)

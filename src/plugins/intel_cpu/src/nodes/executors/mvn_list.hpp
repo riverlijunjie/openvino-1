@@ -4,13 +4,13 @@
 
 #pragma once
 
+#include "executor.hpp"
+
 #include "mvn.hpp"
 #include "x64/jit_mvn.hpp"
 #include "common/ref_mvn.hpp"
 
 #include "onednn/iml_type_mapper.h"
-#include "cache/multi_cache.h"
-
 #include "common/primitive_cache.hpp"
 
 namespace ov {
@@ -23,11 +23,11 @@ struct ExecutorDesc {
 
 const std::vector<ExecutorDesc>& getMVNExecutorsList();
 
-class MVNExecutorFactory {
+class MVNExecutorFactory : public ExecutorFactory {
 public:
     MVNExecutorFactory(const MVNAttrs& mvnAttrs,
                        const std::vector<MemoryDescCPtr>& srcDescs,
-                       const std::vector<MemoryDescCPtr>& dstDescs) {
+                       const std::vector<MemoryDescCPtr>& dstDescs) : ExecutorFactory() {
         for (auto& desc : getMVNExecutorsList()) {
             if (desc.builder->isSupported(mvnAttrs, srcDescs, dstDescs)) {
                 supportedDescs.push_back(desc);
@@ -91,13 +91,8 @@ public:
         IE_THROW() << "Supported executor is not found";
     }
 
-    virtual void setRuntimeCache(const MultiCachePtr& cache) {
-        runtimeCache = cache;
-    }
-
     std::vector<ExecutorDesc> supportedDescs;
     const ExecutorDesc* chosenDesc = nullptr;
-    MultiCachePtr runtimeCache = nullptr;
 };
 
 using MVNExecutorFactoryPtr = std::shared_ptr<MVNExecutorFactory>;
