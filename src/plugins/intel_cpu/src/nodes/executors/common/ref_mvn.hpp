@@ -9,9 +9,9 @@
 namespace ov {
 namespace intel_cpu {
 
-class MVNRefExecutor : public MVNExecutor {
+class RefMVNExecutor : public MVNExecutor {
 public:
-    MVNRefExecutor();
+    RefMVNExecutor();
 
     bool init(const MVNAttrs& mvnAttrs,
               const std::vector<MemoryDescCPtr>& srcDescs,
@@ -38,7 +38,7 @@ public:
     }
 
     MVNExecutorPtr makeExecutor() const override {
-        return std::make_shared<MVNRefExecutor>();
+        return std::make_shared<RefMVNExecutor>();
     }
 };
 

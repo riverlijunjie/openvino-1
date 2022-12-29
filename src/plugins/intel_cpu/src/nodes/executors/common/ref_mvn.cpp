@@ -9,9 +9,9 @@
 namespace ov {
 namespace intel_cpu {
 
-MVNRefExecutor::MVNRefExecutor() : MVNExecutor() {}
+RefMVNExecutor::RefMVNExecutor() : MVNExecutor() {}
 
-bool MVNRefExecutor::init(const MVNAttrs& mvnAttrs,
+bool RefMVNExecutor::init(const MVNAttrs& mvnAttrs,
                           const std::vector<MemoryDescCPtr>& srcDescs,
                           const std::vector<MemoryDescCPtr>& dstDescs,
                           const dnnl::primitive_attr &attr) {
@@ -28,7 +28,7 @@ bool MVNRefExecutor::init(const MVNAttrs& mvnAttrs,
     return true;
 }
 
-void MVNRefExecutor::exec(const std::vector<MemoryCPtr>& src, const std::vector<MemoryPtr>& dst, const void *post_ops_data_) {
+void RefMVNExecutor::exec(const std::vector<MemoryCPtr>& src, const std::vector<MemoryPtr>& dst, const void *post_ops_data_) {
     uint8_t *src_data = reinterpret_cast<uint8_t*>(src[0]->GetPtr());
     uint8_t *dst_data = reinterpret_cast<uint8_t*>(dst[0]->GetPtr());
 

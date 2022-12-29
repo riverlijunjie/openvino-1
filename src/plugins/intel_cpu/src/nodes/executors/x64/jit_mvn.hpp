@@ -73,9 +73,9 @@ struct jit_uni_mvn_kernel {
     int optimized_scaleshift_num = 0;
 };
 
-class MVNJitExecutor : public MVNExecutor {
+class JitMVNExecutor : public MVNExecutor {
 public:
-    MVNJitExecutor();
+    JitMVNExecutor();
 
     bool init(const MVNAttrs& mvnAttrs,
               const std::vector<MemoryDescCPtr>& srcDescs,
@@ -124,7 +124,7 @@ public:
     }
 
     MVNExecutorPtr makeExecutor() const override {
-        return std::make_shared<MVNJitExecutor>();
+        return std::make_shared<JitMVNExecutor>();
     }
 };
 

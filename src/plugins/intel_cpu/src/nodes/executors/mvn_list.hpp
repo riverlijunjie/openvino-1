@@ -16,12 +16,12 @@
 namespace ov {
 namespace intel_cpu {
 
-struct ExecutorDesc {
+struct MVNExecutorDesc {
     impl_desc_type implType;
     MVNExecutorBuilderCPtr builder;
 };
 
-const std::vector<ExecutorDesc>& getMVNExecutorsList();
+const std::vector<MVNExecutorDesc>& getMVNExecutorsList();
 
 class MVNExecutorFactory : public ExecutorFactory {
 public:
@@ -40,10 +40,10 @@ public:
                                         const std::vector<MemoryDescCPtr>& srcDescs,
                                         const std::vector<MemoryDescCPtr>& dstDescs,
                                         const dnnl::primitive_attr &attr) {
-        auto build = [&](const ExecutorDesc* desc) {
+        auto build = [&](const MVNExecutorDesc* desc) {
             switch (desc->implType) {
                 case impl_desc_type::jit_uni: {
-                    auto builder = [&](const MVNJitExecutor::Key& key) -> MVNExecutorPtr {
+                    auto builder = [&](const JitMVNExecutor::Key& key) -> MVNExecutorPtr {
                         auto executor = desc->builder->makeExecutor();
                         if (executor->init(mvnAttrs, srcDescs, dstDescs, attr)) {
                             return executor;
@@ -52,14 +52,8 @@ public:
                         }
                     };
 
-
-                    auto key = MVNJitExecutor::Key(mvnAttrs, srcDescs, dstDescs, attr);
+                    auto key = JitMVNExecutor::Key(mvnAttrs, srcDescs, dstDescs, attr);
                     auto res = runtimeCache->getOrCreate(key, builder);
-                    if (res.second == CacheEntryBase::LookUpStatus::Miss)
-                        std::cerr << "Miss" << std::endl;
-                    else
-                        std::cerr << "Hit" << std::endl;
-
                     return res.first;
                 } break;
                 default: {
@@ -91,8 +85,9 @@ public:
         IE_THROW() << "Supported executor is not found";
     }
 
-    std::vector<ExecutorDesc> supportedDescs;
-    const ExecutorDesc* chosenDesc = nullptr;
+private:
+    std::vector<MVNExecutorDesc> supportedDescs;
+    const MVNExecutorDesc* chosenDesc = nullptr;
 };
 
 using MVNExecutorFactoryPtr = std::shared_ptr<MVNExecutorFactory>;

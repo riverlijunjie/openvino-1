@@ -1007,9 +1007,9 @@ private:
 };
 //////////////////////////////////////////////////////////////////////////////////
 
-MVNJitExecutor::MVNJitExecutor() : MVNExecutor() {}
+JitMVNExecutor::JitMVNExecutor() : MVNExecutor() {}
 
-bool MVNJitExecutor::init(const MVNAttrs& mvnAttrs,
+bool JitMVNExecutor::init(const MVNAttrs& mvnAttrs,
                           const std::vector<MemoryDescCPtr>& srcDescs,
                           const std::vector<MemoryDescCPtr>& dstDescs,
                           const dnnl::primitive_attr &attr) {
@@ -1084,7 +1084,7 @@ bool MVNJitExecutor::init(const MVNAttrs& mvnAttrs,
     return true;
 }
 
-void MVNJitExecutor::exec(const std::vector<MemoryCPtr>& src, const std::vector<MemoryPtr>& dst, const void *post_ops_data_) {
+void JitMVNExecutor::exec(const std::vector<MemoryCPtr>& src, const std::vector<MemoryPtr>& dst, const void *post_ops_data_) {
     if (!mvn_mean_kernel || (mvnAttrs.normalizeVariance_ && !mvn_variance_kernel) || !mvn_kernel) {
         IE_THROW() << "MVN layer doesn't create kernel to execute on sse41 above platform.";
     }
@@ -1100,7 +1100,7 @@ void MVNJitExecutor::exec(const std::vector<MemoryCPtr>& src, const std::vector<
     }
 }
 
-void MVNJitExecutor::mvn_pln(const uint8_t* src_data, uint8_t* dst_data, const void *post_ops_data_) {
+void JitMVNExecutor::mvn_pln(const uint8_t* src_data, uint8_t* dst_data, const void *post_ops_data_) {
     size_t blk_size = 1;  // blk size in vmm
     if (mayiuse(cpu::x64::avx512_core)) {
         blk_size = 16;
@@ -1240,7 +1240,7 @@ void MVNJitExecutor::mvn_pln(const uint8_t* src_data, uint8_t* dst_data, const v
     }
 }
 
-void MVNJitExecutor::mvn_nspc(const uint8_t* src_data, uint8_t* dst_data, const void *post_ops_data_) {
+void JitMVNExecutor::mvn_nspc(const uint8_t* src_data, uint8_t* dst_data, const void *post_ops_data_) {
     size_t blk_size = 1;  // channel blk for memory layout
     if (mayiuse(cpu::x64::avx512_core)) {
         blk_size = 16;
@@ -1338,7 +1338,7 @@ void MVNJitExecutor::mvn_nspc(const uint8_t* src_data, uint8_t* dst_data, const 
     });
 }
 
-void MVNJitExecutor::mvn_blk(const uint8_t* src_data, uint8_t* dst_data, const void *post_ops_data_) {
+void JitMVNExecutor::mvn_blk(const uint8_t* src_data, uint8_t* dst_data, const void *post_ops_data_) {
     size_t blk_size = 1;  // channel blk for memory layout
     if (mayiuse(cpu::x64::avx512_core)) {
         blk_size = 16;
@@ -1569,7 +1569,7 @@ void MVNJitExecutor::mvn_blk(const uint8_t* src_data, uint8_t* dst_data, const v
     }
 }
 
-MVNJitExecutor::Key::Key(const MVNAttrs& mvnAttrs,
+JitMVNExecutor::Key::Key(const MVNAttrs& mvnAttrs,
                     const std::vector<MemoryDescCPtr>& srcDescs,
                     const std::vector<MemoryDescCPtr>& dstDescs,
                     const dnnl::primitive_attr &attr) {
@@ -1581,7 +1581,7 @@ MVNJitExecutor::Key::Key(const MVNAttrs& mvnAttrs,
     this->dstPrc = dstDescs[0]->getPrecision();
 }
 
-size_t MVNJitExecutor::Key::hash() const {
+size_t JitMVNExecutor::Key::hash() const {
     using namespace dnnl::impl;
     using namespace dnnl::impl::primitive_hashing;
 
@@ -1599,7 +1599,7 @@ size_t MVNJitExecutor::Key::hash() const {
     return seed;
 }
 
-bool MVNJitExecutor::Key::operator==(const Key& rhs) const {
+bool JitMVNExecutor::Key::operator==(const Key& rhs) const {
     bool retVal = true;
     retVal = retVal &&
              mvnAttrs.initAcrossChannels_ == rhs.mvnAttrs.initAcrossChannels_ &&

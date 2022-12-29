@@ -7,8 +7,8 @@
 namespace ov {
 namespace intel_cpu {
 
-const std::vector<ExecutorDesc>& getMVNExecutorsList() {
-    static std::vector<ExecutorDesc> descs = {
+const std::vector<MVNExecutorDesc>& getMVNExecutorsList() {
+    static std::vector<MVNExecutorDesc> descs = {
         { impl_desc_type::jit_uni, std::make_shared<JitMVNExecutorBuilder>() },
         { impl_desc_type::ref, std::make_shared<RefMVNExecutorBuilder>() },
     };

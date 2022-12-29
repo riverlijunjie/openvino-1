@@ -11,6 +11,8 @@
 #include <array>
 #include "memory_desc/dnnl_blocked_memory_desc.h"
 
+#include "executors/matmul_list.hpp"
+
 namespace ov {
 namespace intel_cpu {
 namespace node {
@@ -20,24 +22,19 @@ public:
     MatMul(const std::shared_ptr<ngraph::Node>& op, const GraphContext::CPtr context);
 
     void getSupportedDescriptors() override;
-    void createDescriptor(const std::vector<MemoryDescPtr>& inputDesc,
-                          const std::vector<MemoryDescPtr>& outputDesc) override;
     void initSupportedPrimitiveDescriptors() override;
-    MemoryDescPtr getSrcMemDesc(dnnl::primitive_desc_iterator &primitive_desc_it, size_t idx) override;
     bool canFuse(const NodePtr& node) const override;
     bool created() const override;
     size_t getMaxBatch() const override;
 
     InferenceEngine::Precision getRuntimePrecision() const override;
-    size_t descInputNumbers(DnnlDesriptor desc) override {
-        return getOriginalInputsNumber();
-    }
 
     int getFusingAxis() const override {
         return getOutputShapeAtPort(0).getRank() - 1;
     }
 
     void prepareParams() override;
+    void execute(dnnl::stream strm) override;
     void executeDynamicImpl(dnnl::stream strm) override;
 
     static bool isSupportedOperation(const std::shared_ptr<const ngraph::Node>& op, std::string& errorMessage) noexcept;
@@ -48,20 +45,14 @@ protected:
     AttrPtr initPrimitiveAttr(const VectorDims& dims);
 
 private:
-    dnnl::memory::desc getBiasDescFrom(const DnnlMemoryDescCPtr outMemDesc);
-    std::pair<Shape, Shape> makeDummyInputShapes(const Shape& in0, const Shape& in1) const;
-
-    bool withBiases;
-
     void setPostOps(dnnl::primitive_attr &attr, const VectorDims& dims, bool initWeights);
 
+    std::vector<InferenceEngine::Precision> inputPrecisions;
+    std::vector<InferenceEngine::Precision> outputPrecisions;
+
     std::string errorPrefix;
-
-    /* whether to transpose input */
-    std::array<bool, 2> transposeIn;
-
-    std::array<DnnlBlockedMemoryDescPtr, 2> inDataDesc;
-    DnnlBlockedMemoryDescPtr outDataDesc;
+    MatMulAttrs matmulAttrs;
+    std::shared_ptr<MatMulExecutor> execPtr = nullptr;
 };
 
 }   // namespace node
