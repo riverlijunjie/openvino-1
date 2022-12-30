@@ -244,7 +244,7 @@ else()
     set(ACL_LIBRARIES arm_compute::arm_compute
                       arm_compute::arm_compute_core
                       arm_compute::half)
-            
+
     foreach(acl_library IN LISTS ACL_LIBRARIES)
         list(APPEND ACL_INCLUDE_DIRS
                 $<TARGET_PROPERTY:${acl_library},INTERFACE_INCLUDE_DIRECTORIES>)

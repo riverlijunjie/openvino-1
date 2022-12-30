@@ -7,6 +7,7 @@
 #include "executor.hpp"
 
 #include "matmul.hpp"
+#include "acl/acl_matmul.hpp"
 #include "dnnl/dnnl_matmul.hpp"
 
 #include "onednn/iml_type_mapper.h"

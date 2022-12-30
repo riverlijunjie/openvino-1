@@ -9,6 +9,7 @@ namespace intel_cpu {
 
 const std::vector<MatMulExecutorDesc>& getMatMulExecutorsList() {
     static std::vector<MatMulExecutorDesc> descs = {
+        { impl_desc_type::unknown, std::make_shared<AclMatMulExecutorBuilder>() },
         { impl_desc_type::jit_uni, std::make_shared<DnnlMatMulExecutorBuilder>() },
     };
 

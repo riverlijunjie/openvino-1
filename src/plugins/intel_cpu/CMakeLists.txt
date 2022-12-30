@@ -8,6 +8,9 @@ endif()
 
 set(TARGET_NAME "openvino_intel_cpu_plugin")
 
+# TODO: use 14 standart only for ARM build
+set(CMAKE_CXX_STANDARD 14)
+
 if(CMAKE_COMPILER_IS_GNUCC)
     ie_add_compiler_flags(-Wno-all)
 endif()
