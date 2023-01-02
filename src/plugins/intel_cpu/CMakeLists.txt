@@ -32,13 +32,22 @@ if (WIN32)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DNOMINMAX")
 endif()
 
+if(X86_64)
+    add_definitions(-DOV_CPU_X64)
+    set(OV_CPU_X64 ON)
+elseif(AARCH64)
+    add_definitions(-DOV_CPU_AARCH64)
+    set(OV_CPU_AARCH64 ON)
+else()
+    message(FATAL_ERROR "Unsupported system processor ${CMAKE_SYSTEM_PROCESSOR}")
+endif()
+
 if (ENABLE_CPU_DEBUG_CAPS)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DCPU_DEBUG_CAPS")
 endif()
 
 file(GLOB_RECURSE SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp)
-file(GLOB_RECURSE HEADERS ${CMAKE_CURRENT_SOURCE_DIR}/src/*.h
-                          ${CMAKE_CURRENT_SOURCE_DIR}/src/*.hpp)
+file(GLOB_RECURSE HEADERS ${CMAKE_CURRENT_SOURCE_DIR}/src/*.h(pp))
 
 addVersionDefines(${CMAKE_CURRENT_SOURCE_DIR}/src/plugin.cpp CI_BUILD_NUMBER)
 
@@ -48,6 +57,29 @@ if(ENABLE_TESTS)
 endif()
 if(ENABLE_FUNCTIONAL_TESTS)
     add_subdirectory(tests/functional)
+endif()
+
+if(ACL_FOUND)
+    add_definitions(-DOV_CPU_WITH_ACL)
+    set(OV_CPU_WITH_ACL ON)
+endif()
+
+if (NOT OV_CPU_WITH_ACL)
+    file(GLOB_RECURSE SOURCES_TO_REMOVE ${CMAKE_CURRENT_SOURCE_DIR}/src/nodes/executors/acl/*.cpp)
+    file(GLOB_RECURSE HEADERS_TO_REMOVE ${CMAKE_CURRENT_SOURCE_DIR}/src/nodes/executors/acl/*.h
+                                        ${CMAKE_CURRENT_SOURCE_DIR}/src/nodes/executors/acl/*.hpp)
+
+    list(REMOVE_ITEM SOURCES ${SOURCES_TO_REMOVE})
+    list(REMOVE_ITEM HEADERS ${HEADERS_TO_REMOVE})
+endif()
+
+if (NOT OV_CPU_X64)
+    file(GLOB_RECURSE SOURCES_TO_REMOVE ${CMAKE_CURRENT_SOURCE_DIR}/src/nodes/executors/x64/*.cpp)
+    file(GLOB_RECURSE HEADERS_TO_REMOVE ${CMAKE_CURRENT_SOURCE_DIR}/src/nodes/executors/x64/*.h
+                                        ${CMAKE_CURRENT_SOURCE_DIR}/src/nodes/executors/x64/*.hpp)
+
+    list(REMOVE_ITEM SOURCES ${SOURCES_TO_REMOVE})
+    list(REMOVE_ITEM HEADERS ${HEADERS_TO_REMOVE})
 endif()
 
 # create plugin

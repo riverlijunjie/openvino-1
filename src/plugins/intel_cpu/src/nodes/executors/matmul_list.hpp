@@ -7,7 +7,10 @@
 #include "executor.hpp"
 
 #include "matmul.hpp"
+#if defined(OV_CPU_WITH_ACL)
 #include "acl/acl_matmul.hpp"
+#endif
+
 #include "dnnl/dnnl_matmul.hpp"
 
 #include "onednn/iml_type_mapper.h"
