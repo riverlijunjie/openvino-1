@@ -180,12 +180,12 @@ Node::NodesFactory::NodesFactory()
     INTEL_CPU_NODE(GRN, Type::GRN);
     INTEL_CPU_NODE(NonZero, Type::NonZero);
     INTEL_CPU_NODE(Snippet, Type::Subgraph);
-    INTEL_CPU_NODE(ColorConvert, Type::ColorConvert);
     INTEL_CPU_NODE(PriorBox, Type::PriorBox);
     INTEL_CPU_NODE(PriorBoxClustered, Type::PriorBoxClustered);
     INTEL_CPU_NODE(Eye, Type::Eye);
     INTEL_CPU_NODE(Unique, Type::Unique);
 #if defined(OV_CPU_X64)
+    INTEL_CPU_NODE(ColorConvert, Type::ColorConvert);
     INTEL_CPU_NODE(NormalizeL2, Type::NormalizeL2);
     INTEL_CPU_NODE(BinaryConvolution, Type::BinaryConvolution);
     INTEL_CPU_NODE(Reduce, Type::Reduce);

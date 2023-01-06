@@ -10,7 +10,7 @@
 #include <openvino/op/i420_to_bgr.hpp>
 #include <openvino/core/type.hpp>
 #include <ie/ie_parallel.hpp>
-#include <utils/jit_kernel.hpp>
+#include "kernels/x64/jit_kernel.hpp"
 
 using namespace InferenceEngine;
 using namespace dnnl::impl::utils;
@@ -969,7 +969,7 @@ public:
 /**
  * Implements Color Convert shape inference algorithm. Depending on wether it has only single plain H dimension is
  * passed through or recalculated as 2/3 of the initial size.
- * 
+ *
  */
 class ColorConvertShapeInfer : public ShapeInferEmptyPads {
 public:

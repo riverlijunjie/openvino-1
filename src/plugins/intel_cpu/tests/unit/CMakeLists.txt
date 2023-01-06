@@ -12,6 +12,11 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
     ie_add_compiler_flags(/wd5051)
 endif()
 
+if (NOT OV_CPU_X64)
+    set(EXCLUDED_SOURCE_PATHS_FOR_NON_X64 ${CMAKE_CURRENT_SOURCE_DIR}/jit_kernel_test.cpp
+                                          ${CMAKE_CURRENT_SOURCE_DIR}/registers_pool.cpp)
+endif()
+
 addIeTargetTest(
         NAME ${TARGET_NAME}
         ROOT ${CMAKE_CURRENT_SOURCE_DIR}
@@ -25,6 +30,8 @@ addIeTargetTest(
                 $<TARGET_PROPERTY:openvino::conditional_compilation,INTERFACE_INCLUDE_DIRECTORIES>
             PRIVATE
                 $<TARGET_PROPERTY:inference_engine_snippets,SOURCE_DIR>/include
+        EXCLUDED_SOURCE_PATHS
+            ${EXCLUDED_SOURCE_PATHS_FOR_NON_X64}
         OBJECT_FILES
             ${OBJ_LIB}
         LINK_LIBRARIES

@@ -6,7 +6,7 @@
 #include "cpu_memcpy.h"
 #include <utils/bfloat16.hpp>
 #include <utils/general_utils.h>
-#include <utils/jit_kernel.hpp>
+#include "nodes/kernels/x64/jit_kernel.hpp"
 #include <selective_build.h>
 #include <ie_parallel.hpp>
 #include <openvino/core/type/float16.hpp>
