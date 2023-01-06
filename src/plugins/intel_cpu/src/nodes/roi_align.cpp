@@ -15,7 +15,7 @@
 #include <ngraph/opsets/opset9.hpp>
 
 #include <cpu/x64/jit_generator.hpp>
-#include "emitters/jit_load_store_emitters.hpp"
+#include "emitters/x64/jit_load_store_emitters.hpp"
 
 using namespace InferenceEngine;
 using namespace dnnl;

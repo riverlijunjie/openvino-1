@@ -7,8 +7,8 @@
 #include <dnnl_extension_utils.h>
 #include "utils/bfloat16.hpp"
 #include "ie_parallel.hpp"
-#include "emitters/jit_load_store_emitters.hpp"
-#include "emitters/jit_bf16_emitters.hpp"
+#include "emitters/x64/jit_load_store_emitters.hpp"
+#include "emitters/x64/jit_bf16_emitters.hpp"
 
 #include <cpu/x64/jit_generator.hpp>
 #include <cpu/x64/jit_uni_eltwise.hpp>

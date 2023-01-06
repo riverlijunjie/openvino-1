@@ -1556,7 +1556,8 @@ bool Node::canFuseSimpleOperation(const NodePtr& node) const {
     } else if (node->getType() == Type::Eltwise) {
         return one_of(node->getAlgorithm(),
                       Algorithm::EltwiseRelu,
-                      Algorithm::EltwiseGelu,
+                      Algorithm::EltwiseGeluErf,
+                      Algorithm::EltwiseGeluTanh,
                       Algorithm::EltwiseElu,
                       Algorithm::EltwiseSigmoid,
                       Algorithm::EltwiseClamp,

@@ -978,7 +978,8 @@ void GraphOptimizer::FuseConvolutionAndSimpleOperationThroughMaxPool(Graph &grap
         }
 
         if (!one_of(fuseCandidate->getAlgorithm(), Algorithm::EltwiseRelu,
-                                                   Algorithm::EltwiseGelu,
+                                                   Algorithm::EltwiseGeluErf,
+                                                   Algorithm::EltwiseGeluTanh,
                                                    Algorithm::EltwiseElu,
                                                    Algorithm::EltwiseSigmoid,
                                                    Algorithm::EltwiseClamp,

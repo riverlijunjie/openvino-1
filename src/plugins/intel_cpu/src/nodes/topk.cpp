@@ -9,7 +9,7 @@
 #include <set>
 #include <onednn/dnnl.h>
 #include <dnnl_extension_utils.h>
-#include "emitters/jit_load_store_emitters.hpp"
+#include "emitters/x64/jit_load_store_emitters.hpp"
 #include "ie_parallel.hpp"
 #include <ngraph/op/topk.hpp>
 #include <ie_ngraph_utils.hpp>

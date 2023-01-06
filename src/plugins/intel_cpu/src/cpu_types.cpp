@@ -447,7 +447,8 @@ std::string algToString(const Algorithm alg) {
     CASE(EltwiseLogicalXor);
     CASE(EltwiseLogicalNot);
     CASE(EltwiseRelu);
-    CASE(EltwiseGelu);
+    CASE(EltwiseGeluErf);
+    CASE(EltwiseGeluTanh);
     CASE(EltwiseElu);
     CASE(EltwiseTanh);
     CASE(EltwiseSigmoid);
@@ -467,7 +468,6 @@ std::string algToString(const Algorithm alg) {
     CASE(FQCommon);
     CASE(FQQuantization);
     CASE(FQBinarization);
-    CASE(FQRequantization);
     CASE(ROIPoolingMax);
     CASE(ROIPoolingBilinear);
     CASE(ROIAlignMax);

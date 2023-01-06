@@ -80,6 +80,13 @@ if (NOT OV_CPU_X64)
 
     list(REMOVE_ITEM SOURCES ${SOURCES_TO_REMOVE})
     list(REMOVE_ITEM HEADERS ${HEADERS_TO_REMOVE})
+
+    file(GLOB_RECURSE SOURCES_TO_REMOVE ${CMAKE_CURRENT_SOURCE_DIR}/src/emitters/x64/*.cpp)
+    file(GLOB_RECURSE HEADERS_TO_REMOVE ${CMAKE_CURRENT_SOURCE_DIR}/src/emitters/x64/*.h
+                                        ${CMAKE_CURRENT_SOURCE_DIR}/src/emitters/x64/*.hpp)
+
+    list(REMOVE_ITEM SOURCES ${SOURCES_TO_REMOVE})
+    list(REMOVE_ITEM HEADERS ${HEADERS_TO_REMOVE})
 endif()
 
 # create plugin

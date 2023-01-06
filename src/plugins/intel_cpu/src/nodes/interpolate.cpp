@@ -20,8 +20,8 @@
 #include <cpu/x64/injectors/jit_uni_eltwise_injector.hpp>
 #include "common/cpu_memcpy.h"
 #include "utils/bfloat16.hpp"
-#include "emitters/jit_bf16_emitters.hpp"
-#include "emitters/jit_load_store_emitters.hpp"
+#include "emitters/x64/jit_bf16_emitters.hpp"
+#include "emitters/x64/jit_load_store_emitters.hpp"
 
 #include <ngraph/opsets/opset1.hpp>
 #include <ngraph/opsets/opset4.hpp>
@@ -1548,7 +1548,7 @@ bool Interpolate::isSupportedOperation(const std::shared_ptr<const ngraph::Node>
 namespace {
 /**
  * Interpolate shape inference factory. It defines the input mask depending on the shape calculation mode.
- * 
+ *
  */
 class InterpolateShapeInferFactory : public ShapeInferFactory {
 public:

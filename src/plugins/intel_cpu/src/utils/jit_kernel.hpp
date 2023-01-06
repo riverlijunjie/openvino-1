@@ -4,7 +4,7 @@
 
 #pragma once
 #include <cpu/x64/jit_generator.hpp>
-#include <emitters/jit_load_store_emitters.hpp>
+#include "emitters/x64/jit_load_store_emitters.hpp"
 #include <ie/ie_precision.hpp>
 #include <common/nstl.hpp>
 #include <type_traits>

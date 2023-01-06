@@ -4,20 +4,6 @@
 
 #include "matmul_list.hpp"
 
-#if defined(OV_CPU_WITH_ACL)
-#define OV_CPU_INSTANCE_ACL(...) \
-    {__VA_ARGS__},
-#else
-#define OV_CPU_INSTANCE_ACL(...)
-#endif
-
-#if defined(OV_CPU_X64)
-#define OV_CPU_INSTANCE_X64(...) \
-    {__VA_ARGS__},
-#else
-#define OV_CPU_INSTANCE_X64(...)
-#endif
-
 namespace ov {
 namespace intel_cpu {
 
