@@ -547,49 +547,39 @@ void Convolution::getSupportedDescriptors() {
             bool acceptedFormat = inputDataType == memory::data_type::bf16;
             bool nspcAdded = false;
             acceptedFormat |= (shouldTryBrgconv && inputDataType == memory::data_type::f32);
-            // if (acceptedFormat && impl::cpu::x64::mayiuse(impl::cpu::x64::avx512_core)) {
-            //     in_candidate = std::make_shared<DnnlBlockedMemoryDesc>(inputShape, inputDataType, nspc);
-            //     out_candidate = std::make_shared<DnnlBlockedMemoryDesc>(outputShape, outputDataType, nspc);
-            //     createDescriptor({ in_candidate }, { out_candidate });
-            //     nspcAdded = true;
-            // }
+            if (acceptedFormat && impl::cpu::x64::mayiuse(impl::cpu::x64::avx512_core)) {
+                in_candidate = std::make_shared<DnnlBlockedMemoryDesc>(inputShape, inputDataType, nspc);
+                out_candidate = std::make_shared<DnnlBlockedMemoryDesc>(outputShape, outputDataType, nspc);
+                createDescriptor({ in_candidate }, { out_candidate });
+                nspcAdded = true;
+            }
 
-            // if (IC == 1 && groupOC == 1) {
-            //     in_candidate = std::make_shared<DnnlBlockedMemoryDesc>(inputShape, inputDataType, ncsp);
-            //     out_candidate = std::make_shared<DnnlBlockedMemoryDesc>(outputShape, outputDataType, ncsp);
-            //     createDescriptor({ in_candidate }, { out_candidate });
-            // } else if (IC < 4) {
-            //     in_candidate = std::make_shared<DnnlBlockedMemoryDesc>(inputShape, inputDataType, ncsp);
-            //     out_candidate = std::make_shared<DnnlBlockedMemoryDesc>(outputShape, outputDataType, nCsp16c);
-            //     createDescriptor({ in_candidate }, { out_candidate });
-            //     out_candidate = std::make_shared<DnnlBlockedMemoryDesc>(outputShape, outputDataType, nCsp8c);
-            //     createDescriptor({ in_candidate }, { out_candidate });
-            // } else {
-            //     in_candidate = std::make_shared<DnnlBlockedMemoryDesc>(inputShape, inputDataType, nCsp16c);
-            //     out_candidate = std::make_shared<DnnlBlockedMemoryDesc>(outputShape, outputDataType, nCsp16c);
-            //     createDescriptor({ in_candidate }, { out_candidate });
-            //     in_candidate = std::make_shared<DnnlBlockedMemoryDesc>(inputShape, inputDataType, nCsp8c);
-            //     out_candidate = std::make_shared<DnnlBlockedMemoryDesc>(outputShape, outputDataType, nCsp8c);
-            //     createDescriptor({ in_candidate }, { out_candidate });
-            // }
-
-            // in_candidate = std::make_shared<DnnlBlockedMemoryDesc>(inputShape, inputDataType, ncsp);
-            // out_candidate = std::make_shared<DnnlBlockedMemoryDesc>(outputShape, outputDataType, ncsp);
-            // createDescriptor({ in_candidate }, { out_candidate });
-
-            // if (!nspcAdded && (inputDataType != memory::data_type::bf16 && isNspcAvailable())) {
-            //     in_candidate = std::make_shared<DnnlBlockedMemoryDesc>(inputShape, inputDataType, nspc);
-            //     out_candidate = std::make_shared<DnnlBlockedMemoryDesc>(outputShape, outputDataType, nspc);
-            //     createDescriptor({ in_candidate }, { out_candidate });
-            // }
+            if (IC == 1 && groupOC == 1) {
+                in_candidate = std::make_shared<DnnlBlockedMemoryDesc>(inputShape, inputDataType, ncsp);
+                out_candidate = std::make_shared<DnnlBlockedMemoryDesc>(outputShape, outputDataType, ncsp);
+                createDescriptor({ in_candidate }, { out_candidate });
+            } else if (IC < 4) {
+                in_candidate = std::make_shared<DnnlBlockedMemoryDesc>(inputShape, inputDataType, ncsp);
+                out_candidate = std::make_shared<DnnlBlockedMemoryDesc>(outputShape, outputDataType, nCsp16c);
+                createDescriptor({ in_candidate }, { out_candidate });
+                out_candidate = std::make_shared<DnnlBlockedMemoryDesc>(outputShape, outputDataType, nCsp8c);
+                createDescriptor({ in_candidate }, { out_candidate });
+            } else {
+                in_candidate = std::make_shared<DnnlBlockedMemoryDesc>(inputShape, inputDataType, nCsp16c);
+                out_candidate = std::make_shared<DnnlBlockedMemoryDesc>(outputShape, outputDataType, nCsp16c);
+                createDescriptor({ in_candidate }, { out_candidate });
+                in_candidate = std::make_shared<DnnlBlockedMemoryDesc>(inputShape, inputDataType, nCsp8c);
+                out_candidate = std::make_shared<DnnlBlockedMemoryDesc>(outputShape, outputDataType, nCsp8c);
+                createDescriptor({ in_candidate }, { out_candidate });
+            }
 
             in_candidate = std::make_shared<DnnlBlockedMemoryDesc>(inputShape, inputDataType, nspc);
             out_candidate = std::make_shared<DnnlBlockedMemoryDesc>(outputShape, outputDataType, nspc);
             createDescriptor({ in_candidate }, { out_candidate });
 
-            // in_candidate = std::make_shared<DnnlBlockedMemoryDesc>(inputShape, inputDataType, ncsp);
-            // out_candidate = std::make_shared<DnnlBlockedMemoryDesc>(outputShape, outputDataType, ncsp);
-            // createDescriptor({ in_candidate }, { out_candidate });
+            in_candidate = std::make_shared<DnnlBlockedMemoryDesc>(inputShape, inputDataType, ncsp);
+            out_candidate = std::make_shared<DnnlBlockedMemoryDesc>(outputShape, outputDataType, ncsp);
+            createDescriptor({ in_candidate }, { out_candidate });
         }
     }
 }
