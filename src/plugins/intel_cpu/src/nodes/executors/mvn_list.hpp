@@ -42,6 +42,7 @@ public:
                                         const dnnl::primitive_attr &attr) {
         auto build = [&](const MVNExecutorDesc* desc) {
             switch (desc->implType) {
+#if defined(OV_CPU_X64)
                 case impl_desc_type::jit_uni: {
                     auto builder = [&](const JitMVNExecutor::Key& key) -> MVNExecutorPtr {
                         auto executor = desc->builder->makeExecutor();
@@ -56,6 +57,7 @@ public:
                     auto res = runtimeCache->getOrCreate(key, builder);
                     return res.first;
                 } break;
+#endif
                 default: {
                     auto executor = desc->builder->makeExecutor();
                     if (executor->init(mvnAttrs, srcDescs, dstDescs, attr)) {

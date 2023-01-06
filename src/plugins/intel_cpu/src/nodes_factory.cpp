@@ -124,8 +124,6 @@ Node::NodesFactory::NodesFactory()
     INTEL_CPU_NODE(MemoryInput, Type::MemoryInput);
     INTEL_CPU_NODE(MemoryOutput, Type::MemoryOutput);
     INTEL_CPU_NODE(Tile, Type::Tile);
-    INTEL_CPU_NODE(DFT, Type::DFT);
-    INTEL_CPU_NODE(RDFT, Type::RDFT);
     INTEL_CPU_NODE(GatherTree, Type::GatherTree);
     INTEL_CPU_NODE(SpaceToDepth, Type::SpaceToDepth);
     INTEL_CPU_NODE(FullyConnected, Type::FullyConnected);
@@ -173,8 +171,6 @@ Node::NodesFactory::NodesFactory()
     INTEL_CPU_NODE(ShuffleChannels, Type::ShuffleChannels);
     INTEL_CPU_NODE(DepthToSpace, Type::DepthToSpace);
     INTEL_CPU_NODE(Deconvolution, Type::Deconvolution);
-    INTEL_CPU_NODE(Gather, Type::Gather);
-    INTEL_CPU_NODE(GridSample, Type::GridSample);
     INTEL_CPU_NODE(Range, Type::Range);
     INTEL_CPU_NODE(StridedSlice, Type::StridedSlice);
     INTEL_CPU_NODE(GRN, Type::GRN);
@@ -185,6 +181,10 @@ Node::NodesFactory::NodesFactory()
     INTEL_CPU_NODE(Eye, Type::Eye);
     INTEL_CPU_NODE(Unique, Type::Unique);
 #if defined(OV_CPU_X64)
+    INTEL_CPU_NODE(Gather, Type::Gather);
+    INTEL_CPU_NODE(GridSample, Type::GridSample);
+    INTEL_CPU_NODE(DFT, Type::DFT);
+    INTEL_CPU_NODE(RDFT, Type::RDFT);
     INTEL_CPU_NODE(ColorConvert, Type::ColorConvert);
     INTEL_CPU_NODE(NormalizeL2, Type::NormalizeL2);
     INTEL_CPU_NODE(BinaryConvolution, Type::BinaryConvolution);
