@@ -52,6 +52,10 @@ function(ie_add_onednn)
     endif()
     if(X86_64)
         set(DNNL_TARGET_ARCH "X64" CACHE STRING "" FORCE)
+    elseif(X86)
+        set(DNNL_TARGET_ARCH "X86" CACHE STRING "" FORCE)
+    elseif(RISCV64)
+        set(DNNL_TARGET_ARCH "RV64" CACHE STRING "" FORCE)
     elseif(AARCH64)
         set(DNNL_TARGET_ARCH "AARCH64" CACHE STRING "" FORCE)
         set(DNNL_AARCH64_USE_ACL ON CACHE BOOL "" FORCE)
@@ -68,8 +72,8 @@ function(ie_add_onednn)
             set(ARM_COMPUTE_TARGET_ARCH_DEFAULT arm64-v8a)
         endif()
         set(ARM_COMPUTE_TARGET_ARCHS arm64-v8a arm64-v8.2-a arm64-v8.2-a-sve arm64-v8.2-a-sve2
-                                    armv8a armv8.2-a armv8.2-a-sve armv8.6-a armv8.6-a-sve armv8.6-a-sve2
-                                    armv8r64)
+                                     armv8a armv8.2-a armv8.2-a-sve armv8.6-a armv8.6-a-sve armv8.6-a-sve2
+                                     armv8r64)
 
         set(ARM_COMPUTE_TARGET_ARCH "${ARM_COMPUTE_TARGET_ARCH_DEFAULT}" CACHE STRING "Architecture for ARM ComputeLibrary")
         set_property(CACHE ARM_COMPUTE_TARGET_ARCH PROPERTY STRINGS ${ARM_COMPUTE_TARGET_ARCHS})

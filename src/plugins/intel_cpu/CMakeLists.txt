@@ -38,6 +38,8 @@ if(X86_64)
 elseif(AARCH64)
     add_definitions(-DOV_CPU_AARCH64)
     set(OV_CPU_AARCH64 ON)
+elseif(X86 OR RISCV64)
+    # nothing for now
 else()
     message(FATAL_ERROR "Unsupported system processor ${CMAKE_SYSTEM_PROCESSOR}")
 endif()

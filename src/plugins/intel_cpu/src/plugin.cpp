@@ -25,13 +25,30 @@
 #include "weights_cache.hpp"
 #include "utils/denormals.hpp"
 
-#if !defined(__arm__) && !defined(_M_ARM) && !defined(__aarch64__) && !defined(_M_ARM64)
-#ifndef __GNUC_PREREQ
-#define __GNUC_PREREQ(major, minor) ((((__GNUC__) << 16) + (__GNUC_MINOR__)) >= (((major) << 16) + (minor)))
+#if defined(__arm__) || defined(_M_ARM)
+# define OV_CPU_ARM
+#elif defined(__aarch64__) || defined(_M_ARM64)
+# define OV_CPU_ARM64
+#elif defined(i386) || defined(__i386) || defined(__i386__) || defined(__IA32__) || \
+      defined(_M_I86) || defined(_M_IX86) || defined(__X86__) || defined(_X86_)
+# define OV_CPU_X86
+#elif defined(__amd64__) || defined(__amd64) || defined(__x86_64__) || \
+      defined(__x86_64) || defined(_M_X64) || defined(_M_AMD64)
+# define OV_CPU_X86_64
+#elif defined(__riscv)
+# define OV_CPU_RISCV64
 #endif
+
+#if !(defined(OV_CPU_ARM) || defined(OV_CPU_ARM64))
+# ifndef __GNUC_PREREQ
+# define __GNUC_PREREQ(major, minor) ((((__GNUC__) << 16) + (__GNUC_MINOR__)) >= (((major) << 16) + (minor)))
+#endif
+
 # ifdef _WIN32
 #  include <intrin.h>
 #  include <windows.h>
+#elif defined(__EMSCRIPTEN__)
+// nothing
 # elif !(__GNUC_PREREQ(4, 3) && !defined(__APPLE__))
 #  include <cpuid.h>
 # endif
@@ -55,7 +72,15 @@ namespace intel_cpu {
 
 static std::string getDeviceFullName() {
     std::string brand_string;
-#if !defined(__arm__) && !defined(_M_ARM) && !defined(__aarch64__) && !defined(_M_ARM64)
+#ifdef __EMSCRIPTEN__
+    brand_string = "WebAssembly CPU";
+#elif defined(OV_CPU_RISCV64)
+    // TODO: extract actual device name
+    brand_string = "RISCV-64 CPU";
+#elif defined(OV_CPU_ARM64) || defined(OV_CPU_ARM)
+    // TODO: extract actual device name
+    brand_string = "ARM CPU";
+#elif defined(OV_CPU_X86_64) || defined(OV_CPU_X86)
     const unsigned int addr_list[3] = { 0x80000002, 0x80000003, 0x80000004 };
     unsigned int regs[4];
     for (auto addr : addr_list) {
@@ -70,7 +95,7 @@ static std::string getDeviceFullName() {
             brand_string += ch[j];
     }
 #else
-    brand_string = "Non Intel Architecture";
+# error "Unknown device architecture"
 #endif
     return brand_string;
 }

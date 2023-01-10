@@ -9,9 +9,6 @@
 namespace ov {
 namespace intel_cpu {
 
-using Dim = std::size_t;
-using VectorDims = std::vector<Dim>;
-
 const InferenceEngine::details::caseless_unordered_map<std::string, Type> type_to_name_tbl = {
         { "Constant", Type::Input },
         { "Parameter", Type::Input },
