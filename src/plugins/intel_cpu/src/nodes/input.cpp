@@ -33,8 +33,9 @@ using namespace Xbyak;
 namespace ov {
 namespace intel_cpu {
 namespace node {
-namespace {
 
+#if defined(OV_CPU_X64)
+namespace {
 struct jit_has_subnormals_base : public jit_generator {
     DECLARE_CPU_JIT_AUX_FUNCTIONS(jit_has_subnormals_base)
 
@@ -229,6 +230,7 @@ jit_has_subnormals_base::fn_t jit_has_subnormals_function() {
 }
 
 }   // namespace
+#endif
 
 Input::Input(const std::shared_ptr<ngraph::Node>& op, const GraphContext::CPtr context)
         : Node(op, context, PassThroughShapeInferFactory()) {
@@ -283,6 +285,7 @@ void Input::cloneBlobIfRequired() {
 
     // The presence of subnormals is better to determined at IR read time.
     auto hasSubnormals = [&, this] () {
+#if defined(OV_CPU_X64)
         if (prec == InferenceEngine::Precision::FP32) {
             uint32_t const *u32data = constOp->get_data_ptr<uint32_t>();
 
@@ -318,6 +321,7 @@ void Input::cloneBlobIfRequired() {
                 }
             }
         }
+#endif
         return false;
     };
 
