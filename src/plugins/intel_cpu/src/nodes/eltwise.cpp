@@ -811,16 +811,9 @@ void Eltwise::prepareParams() {
         }
     }
 
-<<<<<<< HEAD
-    auto cache = context->getParamsCache();
-    auto result = cache->getOrCreate(key, buildExecutor);
-    execPtr = result.first;
-}
-=======
     auto selectedPD = getSelectedPrimitiveDescriptor();
     execPtr = selectedPD->getExecutorFactoryAs<EltwiseExecutorFactory>()->makeExecutor(eltwiseAttrs, srcMemoryDescs, dstMemoryDescs, postOps);
     selectedPD->setImplementationType(execPtr->getImplType());
->>>>>>> Added Eltwise executor
 
     // EltwiseData thisOp{getAlgorithm(), getOneDnnAlgorithm(), getAlpha(), getBeta(), getGamma()};
 

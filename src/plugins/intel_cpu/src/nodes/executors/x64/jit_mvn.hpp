@@ -5,6 +5,7 @@
 #pragma once
 
 #include "mvn.hpp"
+#include "cpu/x64/cpu_isa_traits.hpp"
 
 namespace ov {
 namespace intel_cpu {
@@ -120,7 +121,7 @@ private:
 class JitMVNExecutorBuilder : public MVNExecutorBuilder {
 public:
     bool isSupported(const MVNAttrs& mvnAttrs, const std::vector<MemoryDescCPtr>& srcDescs, const std::vector<MemoryDescCPtr>& dstDescs) const override {
-        return true;
+        return dnnl::impl::cpu::x64::mayiuse(dnnl::impl::cpu::x64::sse41);
     }
 
     MVNExecutorPtr makeExecutor() const override {

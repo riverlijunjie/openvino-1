@@ -33,6 +33,18 @@ bool RefEltwiseExecutor::init(const EltwiseAttrs& eltwiseAttrs,
                               const std::vector<MemoryDescPtr>& srcDescs,
                               const std::vector<MemoryDescPtr>& dstDescs,
                               const std::vector<EltwisePostOp>& postOps) {
+    for (const auto& desc : srcDescs) {
+        if (desc->getPrecision() != InferenceEngine::Precision::FP32)
+            return false;
+    }
+    for (const auto& desc : dstDescs) {
+        if (desc->getPrecision() != InferenceEngine::Precision::FP32)
+            return false;
+    }
+
+    if (!postOps.empty())
+        return false;
+
     this->eltwiseAttrs = eltwiseAttrs;
 
     auto outBlockingDesc = MemoryDescUtils::convertToBlockedMemoryDesc(dstDescs[0]);

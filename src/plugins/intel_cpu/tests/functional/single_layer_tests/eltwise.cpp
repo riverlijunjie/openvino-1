@@ -199,7 +199,11 @@ std::vector<ngraph::helpers::EltwiseTypes> eltwiseOpTypesDiffInp = { // Differen
 
 ov::AnyMap additional_config;
 
-std::vector<ElementType> netType = {ElementType::bf16, ElementType::f32};
+std::vector<ElementType> netType = {
+#if defined(OV_CPU_X64)
+        ElementType::bf16,
+#endif
+        ElementType::f32};
 
 std::vector<CPUSpecificParams> cpuParams_4D = {
         CPUSpecificParams({nChw16c, nChw16c}, {nChw16c}, {}, {}),
@@ -215,6 +219,7 @@ std::vector<CPUSpecificParams> cpuParams_5D = {
 
 const std::vector<fusingSpecificParams> fusingParamsSet{
     emptyFusingSpec,
+#if defined(OV_CPU_X64)
     // eltwise
     fusingSigmoid,
     fusingPRelu1D,
@@ -224,6 +229,7 @@ const std::vector<fusingSpecificParams> fusingParamsSet{
     fusingFakeQuantizePerTensorRelu,
     fusingFakeQuantizePerChannelRelu,
     fusingFQPerChannelSigmoidFQPerTensor
+#endif
 };
 
 std::vector<std::vector<ov::Shape>> inShapes_4D = {

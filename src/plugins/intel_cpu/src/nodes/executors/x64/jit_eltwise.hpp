@@ -5,6 +5,7 @@
 #pragma once
 
 #include "../eltwise.hpp"
+#include "cpu/x64/cpu_isa_traits.hpp"
 
 namespace ov {
 namespace intel_cpu {
@@ -112,7 +113,7 @@ private:
 class JitEltwiseExecutorBuilder : public EltwiseExecutorBuilder {
 public:
     bool isSupported(const EltwiseAttrs& mvnAttrs, const std::vector<MemoryDescPtr>& srcDescs, const std::vector<MemoryDescPtr>& dstDescs) const override {
-        return true;
+        return dnnl::impl::cpu::x64::mayiuse(dnnl::impl::cpu::x64::sse41);
     }
 
     EltwiseExecutorPtr makeExecutor() const override {
