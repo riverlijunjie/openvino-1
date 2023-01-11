@@ -219,7 +219,9 @@ std::vector<std::map<std::string, std::string>> filterAdditionalConfig_BrgemmAmx
 
 const std::vector<ElementType> netPRCs {
     ElementType::f32,
+#if defined(OV_CPU_X64)
     ElementType::bf16
+#endif
 };
 
 std::vector<CPUSpecificParams> filterSpecificParams() {
@@ -327,30 +329,38 @@ const std::vector<ShapeRelatedParams> IS2D_nightly = {
 
 std::vector<fusingSpecificParams> fusingParamsSet2D_smoke {
         emptyFusingSpec,
+#if defined(OV_CPU_X64)
         fusingBias,
         fusingMultiplyPerChannel,
         fusingFakeQuantizePerTensorRelu,
+#endif
 };
 
 std::vector<fusingSpecificParams> fusingParamsSet2D_Brgemm_smoke {
         emptyFusingSpec,
+#if defined(OV_CPU_X64)
         fusingBias,
         fusingMultiplyPerChannel,
         fusingFakeQuantizePerTensorRelu,
+#endif
 };
 
 std::vector<fusingSpecificParams> fusingParamsSet2D_nightly {
+#if defined(OV_CPU_X64)
         fusingRelu,
         fusingScaleShift, // EltwiseMulAdd fusing
         fusingPReluPerTensor,
         fusingFakeQuantizePerChannelRelu,
+#endif
 };
 
 std::vector<fusingSpecificParams> fusingParamsSet2DBF16 {
         emptyFusingSpec,
+#if defined(OV_CPU_X64)
         fusingBias,
         fusingRelu,
         fusingPReluPerTensor,
+#endif
 };
 
 const auto testParams2D_smoke = ::testing::Combine(::testing::Combine(::testing::ValuesIn(IS2D_smoke),
@@ -471,20 +481,26 @@ const std::vector<ShapeRelatedParams> IS3D_nightly = {
 
 std::vector<fusingSpecificParams> fusingParamsSet3D_smoke {
         emptyFusingSpec,
+#if defined(OV_CPU_X64)
         fusingBias,
         fusingMultiplyPerChannel,
         fusingFakeQuantizePerChannel,
         fusingScaleShiftAndFakeQuantizePerChannel,
+#endif
 };
 
 std::vector<fusingSpecificParams> fusingParamsSet3D_nightly {
+#if defined(OV_CPU_X64)
         fusingFakeQuantizePerTensorRelu,
+#endif
 };
 
 std::vector<fusingSpecificParams> fusingParamsSet3DBF16 {
         emptyFusingSpec,
+#if defined(OV_CPU_X64)
         fusingBias,
         fusingMultiplyPerChannel,
+#endif
 };
 
 const auto fullyConnectedParams3D_smoke = ::testing::Combine(::testing::ValuesIn(IS3D_smoke),
@@ -1060,6 +1076,7 @@ const std::vector<ShapeRelatedParams> IS_Dynamic_nightly = {
 
 std::vector<fusingSpecificParams> matmulFusingParams {
         emptyFusingSpec,
+#if defined(OV_CPU_X64)
         fusingElu,
         fusingSqrt,
         fusingPReluPerTensor,
@@ -1072,6 +1089,7 @@ std::vector<fusingSpecificParams> matmulFusingParams {
         // fusingFakeQuantizePerChannelRelu,
         fusingFakeQuantizePerTensorRelu,
         fusingScaleShiftAndFakeQuantizePerChannel,
+#endif
 };
 
 const auto matMulParams = ::testing::Combine(::testing::ValuesIn(IS),
@@ -1211,9 +1229,11 @@ INSTANTIATE_TEST_SUITE_P(smoke_MM_Brgemm_Static, MatMulLayerCPUTest, testBrgemmP
 
 std::vector<fusingSpecificParams> matmulBrgemmAmxFusingParams {
         emptyFusingSpec,
+#if defined(OV_CPU_X64)
         fusingPReluPerTensor,
         fusingAddPerTensor,
         fusingBias,
+#endif
 };
 
 const std::vector<ShapeRelatedParams> IS_brgemm_Amx_smoke = {
