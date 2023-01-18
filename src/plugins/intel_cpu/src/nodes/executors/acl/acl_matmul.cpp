@@ -9,7 +9,7 @@ namespace intel_cpu {
 
 using namespace arm_compute;
 
-TensorShape ShapeCast(const VectorDims& dims) {
+TensorShape shapeCast(const VectorDims& dims) {
     arm_compute::TensorShape tensorShape;
     for (std::size_t i = 0; i < dims.size(); ++i) {
         tensorShape.set(dims.size() - i - 1, dims[i], false);
@@ -21,58 +21,62 @@ TensorShape ShapeCast(const VectorDims& dims) {
     return tensorShape;
 }
 
+inline Dim vectorProduct(const VectorDims& vec, size_t size) {
+    Dim prod = 1;
+    for (size_t i = 0; i < size; ++i)
+        prod *= vec[i];
+    return prod;
+}
+
 AclMatMulExecutor::AclMatMulExecutor() : MatMulExecutor() {}
 
 bool AclMatMulExecutor::init(const MatMulAttrs& matmulAttrs,
-                              const std::vector<MemoryDescPtr>& srcDescs,
-                              const std::vector<MemoryDescPtr>& dstDescs,
-                              const dnnl::primitive_attr &attr) {
-    this->matmulAttrs = matmulAttrs;
-    // _fconn = std::make_unique<NEFullyConnectedLayer>(_memory_manager);
-    // _fconn = std::make_unique<NEFullyConnectedLayer>();
-    // _fconn->configure(conv_input, conv_weights, biases, _qi ? &_outputqi : _output);
+                             const std::vector<MemoryDescPtr>& srcDescs,
+                             const std::vector<MemoryDescPtr>& dstDescs,
+                             const dnnl::primitive_attr &attr) {
+    auto srcDims = srcDescs[0]->getShape().getStaticDims();
+    auto weiDims = srcDescs[1]->getShape().getStaticDims();
+    auto dstDims = dstDescs[0]->getShape().getStaticDims();
+
+    auto srcBatch = vectorProduct(srcDims, srcDims.size() - 2);
+    auto weiBatch = vectorProduct(weiDims, weiDims.size() - 2);
+    auto dstBatch = vectorProduct(dstDims, dstDims.size() - 2);
+    auto M = srcDims[srcDims.size() - 2];
+    auto K = srcDims[srcDims.size() - 1];
+    auto N = weiDims[weiDims.size() - 1];
+
+    // ACL doesn't support cases then both inputs are broadcasted
+    if (srcBatch > 1 && weiBatch > 1 && srcBatch != weiBatch ||
+        srcBatch != dstBatch && weiBatch != dstBatch) {
+        return false;
+    }
+
+    TensorInfo srcTensorInfo = TensorInfo(TensorShape(K, M, 1, srcBatch), 1, DataType::F32, DataLayout::NCHW);
+    TensorInfo weiTensorInfo = TensorInfo(TensorShape(N, K, weiBatch), 1, DataType::F32, DataLayout::NCHW);
+    TensorInfo dstTensorInfo = TensorInfo(TensorShape(N, M, 1, dstBatch), 1, DataType::F32, DataLayout::NCHW);
+
+    if (!arm_compute::NEGEMM::validate(&srcTensorInfo, &weiTensorInfo, nullptr, &dstTensorInfo, 1.0f, 0.0f))
+        return false;
+
+    srcTensor.allocator()->init(srcTensorInfo);
+    weiTensor.allocator()->init(weiTensorInfo);
+    dstTensor.allocator()->init(dstTensorInfo);
+
+    matmul = std::make_unique<arm_compute::NEGEMM>();
+    matmul->configure(&srcTensor, &weiTensor, nullptr, &dstTensor, 1.0f, 0.0f);
+
     return true;
 }
 
 void AclMatMulExecutor::exec(const std::vector<MemoryCPtr>& src, const std::vector<MemoryPtr>& dst, std::unordered_map<int, MemoryPtr> postOpsArgs) {
-    // ARM_COMPUTE_ERROR_ON_MSG(!fc.get(), "Kernel isn't configured");
-
-    arm_compute::Tensor srcTensor;
-    arm_compute::Tensor weiTensor;
-    arm_compute::Tensor biaTensor;
-    arm_compute::Tensor dstTensor;
-
-    TensorInfo srcTensorInfo = TensorInfo(ShapeCast(src[0]->getStaticDims()), 1, DataType::F32, DataLayout::NCHW);
-    TensorInfo weiTensorInfo = TensorInfo(ShapeCast(src[1]->getStaticDims()), 1, DataType::F32, DataLayout::NCHW);
-    TensorInfo biaTensorInfo = TensorInfo(TensorShape(dst[0]->getStaticDims()[1]), 1, DataType::F32, DataLayout::NCHW);
-    TensorInfo dstTensorInfo = TensorInfo(ShapeCast(dst[0]->getStaticDims()), 1, DataType::F32, DataLayout::NCHW);
-
-    ARM_COMPUTE_ERROR_THROW_ON(
-        NEFullyConnectedLayer::validate(srcTensorInfo, weiTensorInfo, matmulAttrs.withBias ? biaTensorInfo : nullptr, dstTensor));
-
-    srcTensor.allocator()->init(srcTensorInfo);
-    weiTensor.allocator()->init(weiTensorInfo);
-    if (matmulAttrs.withBias)
-        biaTensor.allocator()->init(biaTensorInfo);
-    dstTensor.allocator()->init(dstTensorInfo);
-
-    fc->configure(&srcTensor,
-                  &weiTensor,
-                  matmulAttrs.withBias ? &biaTensor : nullptr,
-                  &dstTensor);
-
     srcTensor.allocator()->import_memory(src[0]->GetPtr());
     weiTensor.allocator()->import_memory(src[1]->GetPtr());
-    if (matmulAttrs.withBias)
-        biaTensor.allocator()->import_memory(src[2]->GetPtr());
     dstTensor.allocator()->import_memory(dst[0]->GetPtr());
 
-    fc->run();
+    matmul->run();
 
     srcTensor.allocator()->free();
     weiTensor.allocator()->free();
-    if (matmulAttrs.withBias)
-        biaTensor.allocator()->free();
     dstTensor.allocator()->free();
 }
 

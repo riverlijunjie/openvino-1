@@ -61,7 +61,10 @@ if(ENABLE_FUNCTIONAL_TESTS)
     add_subdirectory(tests/functional)
 endif()
 
-if(ACL_FOUND)
+add_definitions(-DOV_CPU_WITH_DNNL)
+set(OV_CPU_WITH_DNNL ON)
+
+if(DNNL_AARCH64_USE_ACL)
     add_definitions(-DOV_CPU_WITH_ACL)
     set(OV_CPU_WITH_ACL ON)
 endif()

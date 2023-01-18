@@ -219,14 +219,15 @@ std::vector<std::map<std::string, std::string>> filterAdditionalConfig_BrgemmAmx
 
 const std::vector<ElementType> netPRCs {
     ElementType::f32,
-#if defined(OV_CPU_X64)
     ElementType::bf16
-#endif
 };
 
 std::vector<CPUSpecificParams> filterSpecificParams() {
     std::vector<CPUSpecificParams> specificParams;
-    specificParams.push_back(CPUSpecificParams{{}, {}, {"jit_gemm"}, "jit_gemm"});
+    if (with_cpu_x86_sse42())
+        specificParams.push_back(CPUSpecificParams{{}, {}, {"jit_gemm"}, "jit_gemm"});
+    else
+        specificParams.push_back(CPUSpecificParams{{}, {}, {}, CPUTestsBase::any_type});
 
     return specificParams;
 }
@@ -329,38 +330,30 @@ const std::vector<ShapeRelatedParams> IS2D_nightly = {
 
 std::vector<fusingSpecificParams> fusingParamsSet2D_smoke {
         emptyFusingSpec,
-#if defined(OV_CPU_X64)
         fusingBias,
         fusingMultiplyPerChannel,
         fusingFakeQuantizePerTensorRelu,
-#endif
 };
 
 std::vector<fusingSpecificParams> fusingParamsSet2D_Brgemm_smoke {
         emptyFusingSpec,
-#if defined(OV_CPU_X64)
         fusingBias,
         fusingMultiplyPerChannel,
         fusingFakeQuantizePerTensorRelu,
-#endif
 };
 
 std::vector<fusingSpecificParams> fusingParamsSet2D_nightly {
-#if defined(OV_CPU_X64)
         fusingRelu,
         fusingScaleShift, // EltwiseMulAdd fusing
         fusingPReluPerTensor,
         fusingFakeQuantizePerChannelRelu,
-#endif
 };
 
 std::vector<fusingSpecificParams> fusingParamsSet2DBF16 {
         emptyFusingSpec,
-#if defined(OV_CPU_X64)
         fusingBias,
         fusingRelu,
         fusingPReluPerTensor,
-#endif
 };
 
 const auto testParams2D_smoke = ::testing::Combine(::testing::Combine(::testing::ValuesIn(IS2D_smoke),
@@ -481,26 +474,20 @@ const std::vector<ShapeRelatedParams> IS3D_nightly = {
 
 std::vector<fusingSpecificParams> fusingParamsSet3D_smoke {
         emptyFusingSpec,
-#if defined(OV_CPU_X64)
         fusingBias,
         fusingMultiplyPerChannel,
         fusingFakeQuantizePerChannel,
         fusingScaleShiftAndFakeQuantizePerChannel,
-#endif
 };
 
 std::vector<fusingSpecificParams> fusingParamsSet3D_nightly {
-#if defined(OV_CPU_X64)
         fusingFakeQuantizePerTensorRelu,
-#endif
 };
 
 std::vector<fusingSpecificParams> fusingParamsSet3DBF16 {
         emptyFusingSpec,
-#if defined(OV_CPU_X64)
         fusingBias,
         fusingMultiplyPerChannel,
-#endif
 };
 
 const auto fullyConnectedParams3D_smoke = ::testing::Combine(::testing::ValuesIn(IS3D_smoke),
@@ -1074,23 +1061,39 @@ const std::vector<ShapeRelatedParams> IS_Dynamic_nightly = {
     },
 };
 
-std::vector<fusingSpecificParams> matmulFusingParams {
-        emptyFusingSpec,
-#if defined(OV_CPU_X64)
-        fusingElu,
-        fusingSqrt,
-        fusingPReluPerTensor,
-        fusingMultiplyPerChannel,
-        fusingAddPerTensor,
-        fusingBias,
-        fusingFakeQuantizePerChannel,
-        /* @todo FQ unfolds into FQ + Convert + Substract + Multiply after LPT,
-         * so Relu cannot be fused in this case. Should be analysed */
-        // fusingFakeQuantizePerChannelRelu,
-        fusingFakeQuantizePerTensorRelu,
-        fusingScaleShiftAndFakeQuantizePerChannel,
-#endif
-};
+std::vector<CPUSpecificParams> filterSpecificParams() {
+    std::vector<CPUSpecificParams> specificParams;
+    if (with_cpu_x86_sse42())
+        specificParams.push_back(CPUSpecificParams{{}, {}, {"jit_gemm"}, "jit_gemm"});
+    else
+        specificParams.push_back(CPUSpecificParams{{}, {}, {}, CPUTestsBase::any_type});
+
+    return specificParams;
+}
+
+std::vector<fusingSpecificParams> filterMatmulFusingParams() {
+    if (with_cpu_x86_sse42()) {
+        return {
+            emptyFusingSpec,
+            fusingElu,
+            fusingSqrt,
+            fusingPReluPerTensor,
+            fusingMultiplyPerChannel,
+            fusingAddPerTensor,
+            fusingBias,
+            fusingFakeQuantizePerChannel,
+            /* @todo FQ unfolds into FQ + Convert + Substract + Multiply after LPT,
+            * so Relu cannot be fused in this case. Should be analysed */
+            // fusingFakeQuantizePerChannelRelu,
+            fusingFakeQuantizePerTensorRelu,
+            fusingScaleShiftAndFakeQuantizePerChannel,
+        };
+    } else {
+        return {
+            emptyFusingSpec,
+        };
+    }
+}
 
 const auto matMulParams = ::testing::Combine(::testing::ValuesIn(IS),
                                              ::testing::ValuesIn(netPRCs),
@@ -1102,7 +1105,7 @@ const auto matMulParams = ::testing::Combine(::testing::ValuesIn(IS),
 
 const auto testParams = ::testing::Combine(matMulParams,
                                            ::testing::Values(MatMulNodeType::MatMul),
-                                           ::testing::ValuesIn(matmulFusingParams),
+                                           ::testing::ValuesIn(filterMatmulFusingParams()),
                                            ::testing::ValuesIn(filterSpecificParams()));
 
 INSTANTIATE_TEST_SUITE_P(smoke_MM_Static, MatMulLayerCPUTest, testParams, MatMulLayerCPUTest::getTestCaseName);
@@ -1179,7 +1182,7 @@ const auto matMulParamsDynamicFusing = ::testing::Combine(::testing::ValuesIn(IS
 
 const auto testParamsDynamicFusing = ::testing::Combine(matMulParamsDynamicFusing,
                                                   ::testing::Values(MatMulNodeType::MatMul),
-                                                  ::testing::ValuesIn(matmulFusingParams),
+                                                  ::testing::ValuesIn(filterMatmulFusingParams()),
                                                   ::testing::ValuesIn(filterSpecificParams()));
 
 INSTANTIATE_TEST_SUITE_P(smoke_MM_Dynamic_Fusing, MatMulLayerCPUTest, testParamsDynamicFusing, MatMulLayerCPUTest::getTestCaseName);
@@ -1222,18 +1225,16 @@ const auto matMulBrgemmParams_smoke = ::testing::Combine(::testing::ValuesIn(IS_
 
 const auto testBrgemmParams_smoke = ::testing::Combine(matMulBrgemmParams_smoke,
                                                        ::testing::Values(MatMulNodeType::MatMul),
-                                                       ::testing::ValuesIn(matmulFusingParams),
+                                                       ::testing::ValuesIn(filterMatmulFusingParams()),
                                                        ::testing::ValuesIn(filterSpecificParams_Brgemm()));
 
 INSTANTIATE_TEST_SUITE_P(smoke_MM_Brgemm_Static, MatMulLayerCPUTest, testBrgemmParams_smoke, MatMulLayerCPUTest::getTestCaseName);
 
 std::vector<fusingSpecificParams> matmulBrgemmAmxFusingParams {
         emptyFusingSpec,
-#if defined(OV_CPU_X64)
         fusingPReluPerTensor,
         fusingAddPerTensor,
         fusingBias,
-#endif
 };
 
 const std::vector<ShapeRelatedParams> IS_brgemm_Amx_smoke = {
@@ -1275,7 +1276,7 @@ const auto matMulBrgemmParams_nightly = ::testing::Combine(::testing::ValuesIn(I
 
 const auto testBrgemmParams_nightly = ::testing::Combine(matMulBrgemmParams_nightly,
                                                        ::testing::Values(MatMulNodeType::MatMul),
-                                                       ::testing::ValuesIn(matmulFusingParams),
+                                                       ::testing::ValuesIn(filterMatmulFusingParams()),
                                                        ::testing::ValuesIn(filterSpecificParams_Brgemm()));
 
 INSTANTIATE_TEST_SUITE_P(nightly_MM_Brgemm_Static, MatMulLayerCPUTest, testBrgemmParams_nightly, MatMulLayerCPUTest::getTestCaseName);
@@ -1388,7 +1389,7 @@ const auto matMulParamsBrgemmDynamicFusing = ::testing::Combine(::testing::Value
 
 const auto testParamsBrgemmDynamicFusing = ::testing::Combine(matMulParamsBrgemmDynamicFusing,
                                                               ::testing::Values(MatMulNodeType::MatMul),
-                                                              ::testing::ValuesIn(matmulFusingParams),
+                                                              ::testing::ValuesIn(filterMatmulFusingParams()),
                                                               ::testing::ValuesIn(filterSpecificParams_Brgemm()));
 
 INSTANTIATE_TEST_SUITE_P(smoke_MM_Brgemm_Dynamic_Fusing, MatMulLayerCPUTest, testParamsBrgemmDynamicFusing, MatMulLayerCPUTest::getTestCaseName);

@@ -158,25 +158,28 @@ void MatMul::getSupportedDescriptors() {
 void MatMul::initSupportedPrimitiveDescriptors() {
     matmulAttrs.withBias = getOriginalInputsNumber() == 3;
 
-    inputPrecisions = getOriginalInputPrecisions();
-    outputPrecisions = getOriginalOutputPrecisions();
+        inputPrecisions = getOriginalInputPrecisions();
+        outputPrecisions = getOriginalOutputPrecisions();
+    if (dnnl::impl::cpu::x64::mayiuse(dnnl::impl::cpu::x64::sse41)) {
+        if (inputPrecisions[0].size() != inputPrecisions[1].size())
+            inputPrecisions[0] = inputPrecisions[1] = getMaxPrecision(getOriginalInputPrecisions());
 
-    if (inputPrecisions[0].size() != inputPrecisions[1].size())
-        inputPrecisions[0] = inputPrecisions[1] = getMaxPrecision(getOriginalInputPrecisions());
+        // fallback to fp32 for any precision that cannot be handled natively
+        if ((!one_of(inputPrecisions[0] , Precision::U8, Precision::I8, Precision::BF16, Precision::FP32) ||
+            !one_of(inputPrecisions[1] , Precision::I8, Precision::BF16, Precision::FP32))) {
+            outputPrecisions[0] = inputPrecisions[0] = inputPrecisions[1] = Precision::FP32;
+        }
 
-    // fallback to fp32 for any precision that cannot be handled natively
-    if ((!one_of(inputPrecisions[0] , Precision::U8, Precision::I8, Precision::BF16, Precision::FP32) ||
-         !one_of(inputPrecisions[1] , Precision::I8, Precision::BF16, Precision::FP32))) {
-        outputPrecisions[0] = inputPrecisions[0] = inputPrecisions[1] = Precision::FP32;
+        if (!fusedWith.empty()) {
+            outputPrecisions[0] = fusedWith[fusedWith.size() - 1]->getOriginalOutputPrecisionAtPort(0);
+        }
+
+        if (!canBeExecutedInInt8( inputPrecisions[0], inputPrecisions[1]) && one_of(outputPrecisions[0], Precision::U8, Precision::I8))
+            outputPrecisions[0] = Precision::FP32; // INT output is not supported for non-INT inputs
+    } else {
+        inputPrecisions[0] = inputPrecisions[1] = Precision::FP32;
+        outputPrecisions[0] = Precision::FP32;
     }
-
-    if (!fusedWith.empty()) {
-        outputPrecisions[0] = fusedWith[fusedWith.size() - 1]->getOriginalOutputPrecisionAtPort(0);
-    }
-
-    if (!canBeExecutedInInt8( inputPrecisions[0], inputPrecisions[1]) && one_of(outputPrecisions[0], Precision::U8, Precision::I8))
-        outputPrecisions[0] = Precision::FP32; // INT output is not supported for non-INT inputs
-
 
     auto& creatorsMap = BlockedDescCreator::getCommonCreators();
     NodeConfig config;
@@ -271,11 +274,6 @@ void MatMul::executeDynamicImpl(dnnl::stream strm) {
 }
 
 const std::vector<impl_desc_type>& MatMul::getPrimitivesPriority() {
-    std::vector<impl_desc_type> priorities;
-    for (const auto& impl : priorities) {
-        if (std::find(implPriorities.begin(), implPriorities.end(), impl) == implPriorities.end())
-            implPriorities.push_back(impl);
-    }
     return implPriorities;
 }
 }   // namespace node

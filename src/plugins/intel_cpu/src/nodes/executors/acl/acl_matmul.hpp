@@ -6,12 +6,12 @@
 
 // TODO: remove relative path
 #include "../matmul.hpp"
-#include <arm_compute/runtime/NEON/functions/NEFullyConnectedLayer.h>
+#include "arm_compute/runtime/NEON/NEFunctions.h"
 
 namespace ov {
 namespace intel_cpu {
 
-arm_compute::TensorShape ShapeCast(const VectorDims& dims);
+arm_compute::TensorShape shapeCast(const VectorDims& dims);
 
 class AclMatMulExecutor : public MatMulExecutor {
 public:
@@ -32,7 +32,11 @@ public:
 private:
     MatMulAttrs matmulAttrs;
     impl_desc_type implType = impl_desc_type::undef;
-    std::unique_ptr<arm_compute::NEFullyConnectedLayer> fc = nullptr;
+
+    arm_compute::Tensor srcTensor;
+    arm_compute::Tensor weiTensor;
+    arm_compute::Tensor dstTensor;
+    std::unique_ptr<arm_compute::NEGEMM> matmul = nullptr;
 };
 
 class AclMatMulExecutorBuilder : public MatMulExecutorBuilder {
@@ -41,7 +45,19 @@ public:
                      const std::vector<MemoryDescPtr>& srcDescs,
                      const std::vector<MemoryDescPtr>& dstDescs,
                      const dnnl::primitive_attr &attr) const override {
-        // TODO: add correct conditions
+        if (matmulAttrs.transposeA || matmulAttrs.transposeB || matmulAttrs.withBias)
+            return false;
+
+        if (srcDescs[0]->getPrecision() != InferenceEngine::Precision::FP32 ||
+            srcDescs[1]->getPrecision() != InferenceEngine::Precision::FP32 ||
+            dstDescs[0]->getPrecision() != InferenceEngine::Precision::FP32)
+            return false;
+
+        if (!srcDescs[0]->hasLayoutType(LayoutType::ncsp) ||
+            !srcDescs[1]->hasLayoutType(LayoutType::ncsp) ||
+            !dstDescs[0]->hasLayoutType(LayoutType::ncsp))
+            return false;
+
         return true;
     }
 
