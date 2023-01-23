@@ -316,6 +316,8 @@ InferenceEngine::Precision Convolution::fusedEltwisePrecision(const NodePtr& fus
 const std::vector<impl_desc_type>& Convolution::getPrimitivesPriority() {
     std::vector<impl_desc_type> priorities = {
         impl_desc_type::unknown,
+        impl_desc_type::winograd_acl,
+        impl_desc_type::gemm_acl,
         impl_desc_type::brgconv_avx512_amx_1x1,
         impl_desc_type::brgconv_avx512_amx,
         impl_desc_type::jit_avx512_amx_dw,
@@ -860,7 +862,7 @@ void Convolution::createDescriptor(const std::vector<MemoryDescPtr>& inputDesc,
 
     if (isWinograd())
         algorithms.push_back(dnnl::algorithm::convolution_winograd);
-    algorithms.push_back(dnnl::algorithm::convolution_direct);
+    algorithms.push_back(dnnl::algorithm::convolution_auto);
 
     updatePadding();
     for (auto alg : algorithms) {
@@ -1357,7 +1359,7 @@ void Convolution::prepareParams() {
                                                                             alg));
         };
 
-        const auto alg = (key.implType & impl_desc_type::winograd) ? dnnl::algorithm::convolution_winograd : dnnl::algorithm::convolution_direct;
+        const auto alg = (key.implType & impl_desc_type::winograd) ? dnnl::algorithm::convolution_winograd : dnnl::algorithm::convolution_auto;
         std::shared_ptr<DnnlDesriptor> desc = createDnnlConvDesc(key.inp0->getDnnlDesc(),
                                                                       key.inp1->getDnnlDesc(),
                                                                       key.out->getDnnlDesc(),
@@ -1408,7 +1410,7 @@ void Convolution::prepareParams() {
                                                                                   key.dilation,
                                                                                   key.paddingL,
                                                                                   key.paddingR,
-                                                                                  dnnl::algorithm::convolution_direct);
+                                                                                  dnnl::algorithm::convolution_auto);
 
             auto reordItpd = reorderConvDesc->createPrimitiveDescriptorIterator(engine, key.attr);
             if (static_cast<bool>(reordItpd)) {
