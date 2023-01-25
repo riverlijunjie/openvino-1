@@ -19,7 +19,7 @@ namespace ov {
 namespace intel_cpu {
 
 struct MatMulExecutorDesc {
-    impl_desc_type implType;
+    ExecutorType executorType;
     MatMulExecutorBuilderCPtr builder;
 };
 
@@ -44,8 +44,8 @@ public:
                                         const std::vector<MemoryDescPtr>& dstDescs,
                                         const dnnl::primitive_attr &attr) {
         auto build = [&](const MatMulExecutorDesc* desc) {
-            switch (desc->implType) {
-                case impl_desc_type::jit_uni: {
+            switch (desc->executorType) {
+                case ExecutorType::x64: {
                     auto builder = [&](const DnnlMatMulExecutor::Key& key) -> MatMulExecutorPtr {
                         auto executor = desc->builder->makeExecutor();
                         executor->setEngine(engine);
@@ -86,8 +86,8 @@ public:
         }
 
         for (const auto& sd : supportedDescs) {
-            auto executor = sd.builder->makeExecutor();
-            if (executor->init(MatMulAttrs, srcDescs, dstDescs, attr)) {
+            if (auto executor = build(&sd)) {
+                chosenDesc = &sd;
                 return executor;
             }
         }

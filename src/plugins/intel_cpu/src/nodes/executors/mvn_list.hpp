@@ -17,7 +17,7 @@ namespace ov {
 namespace intel_cpu {
 
 struct MVNExecutorDesc {
-    impl_desc_type implType;
+    ExecutorType executorType;
     MVNExecutorBuilderCPtr builder;
 };
 
@@ -41,9 +41,9 @@ public:
                                         const std::vector<MemoryDescCPtr>& dstDescs,
                                         const dnnl::primitive_attr &attr) {
         auto build = [&](const MVNExecutorDesc* desc) {
-            switch (desc->implType) {
+            switch (desc->executorType) {
 #if defined(OPENVINO_ARCH_X86_64)
-                case impl_desc_type::jit_uni: {
+                case ExecutorType::x64: {
                     auto builder = [&](const JitMVNExecutor::Key& key) -> MVNExecutorPtr {
                         auto executor = desc->builder->makeExecutor();
                         if (executor->init(mvnAttrs, srcDescs, dstDescs, attr)) {

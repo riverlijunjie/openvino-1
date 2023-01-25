@@ -9,8 +9,8 @@ namespace intel_cpu {
 
 const std::vector<MVNExecutorDesc>& getMVNExecutorsList() {
     static std::vector<MVNExecutorDesc> descs = {
-        OV_CPU_INSTANCE_X64(impl_desc_type::jit_uni, std::make_shared<JitMVNExecutorBuilder>())
-        OV_CPU_INSTANCE_COMMON(impl_desc_type::ref, std::make_shared<RefMVNExecutorBuilder>())
+        OV_CPU_INSTANCE_X64(ExecutorType::x64, std::make_shared<JitMVNExecutorBuilder>())
+        OV_CPU_INSTANCE_COMMON(ExecutorType::Common, std::make_shared<RefMVNExecutorBuilder>())
     };
 
     return descs;

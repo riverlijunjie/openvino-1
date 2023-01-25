@@ -31,7 +31,7 @@ public:
 
 private:
     MatMulAttrs matmulAttrs;
-    impl_desc_type implType = impl_desc_type::undef;
+    impl_desc_type implType = impl_desc_type::gemm_acl;
 
     arm_compute::Tensor srcTensor;
     arm_compute::Tensor weiTensor;

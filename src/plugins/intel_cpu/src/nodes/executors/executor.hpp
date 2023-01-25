@@ -33,6 +33,14 @@ namespace intel_cpu {
 #define OV_CPU_INSTANCE_COMMON(...) \
     {__VA_ARGS__},
 
+enum class ExecutorType {
+    Undefined,
+    Common,
+    x64,
+    Dnnl,
+    Acl
+};
+
 class ExecutorFactory {
 public:
     ExecutorFactory() = default;

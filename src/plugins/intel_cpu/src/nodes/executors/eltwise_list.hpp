@@ -17,7 +17,7 @@ namespace ov {
 namespace intel_cpu {
 
 struct EltwiseExecutorDesc {
-    impl_desc_type implType;
+    ExecutorType executorType;
     EltwiseExecutorBuilderCPtr builder;
 };
 
@@ -41,8 +41,8 @@ public:
                                         const std::vector<MemoryDescPtr>& dstDescs,
                                         const std::vector<EltwisePostOp>& postOps) {
         auto build = [&](const EltwiseExecutorDesc* desc) {
-            switch (desc->implType) {
-                // case impl_desc_type::jit_uni: {
+            switch (desc->executorType) {
+                // case impl_desc_type::x64: {
                 //     auto builder = [&](const JitEltwiseExecutor::Key& key) -> EltwiseExecutorPtr {
                 //         auto executor = desc->builder->makeExecutor();
                 //         if (executor->init(eltwiseAttrs, srcDescs, dstDescs, attr)) {
