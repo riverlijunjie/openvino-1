@@ -86,8 +86,8 @@ public:
         }
 
         for (const auto& sd : supportedDescs) {
-            if (auto executor = build(&sd)) {
-                chosenDesc = &sd;
+            auto executor = sd.builder->makeExecutor();
+            if (executor->init(MatMulAttrs, srcDescs, dstDescs, attr)) {
                 return executor;
             }
         }

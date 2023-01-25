@@ -3,7 +3,7 @@
 //
 
 #include "fc_bias_fusion.hpp"
-#include "op/fully_connected.hpp"
+#include "../op/fully_connected.hpp"
 #include <numeric>
 #include <ngraph/opsets/opset1.hpp>
 #include <ngraph/rt_info.hpp>

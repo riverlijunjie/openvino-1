@@ -3,7 +3,7 @@
 //
 
 #include "power_static.hpp"
-#include "../itt.hpp"
+#include "transformations/itt.hpp"
 
 ov::intel_cpu::PowerStaticNode::PowerStaticNode(const ngraph::Output<Node> &data,
                                                const float &power,

@@ -3,6 +3,7 @@
 //
 
 #include "transformation_pipeline.h"
+#include "defs.hpp"
 
 // Operations
 #include "openvino/opsets/opset1.hpp"
@@ -86,13 +87,13 @@
 #include "low_precision/group_convolution.hpp"
 
 // CPU specific transformations
-#include "ngraph_transformations/convert_to_cpu_specific_opset.hpp"
-#include "ngraph_transformations/snippets_mark_skipped.hpp"
-#include "ngraph_transformations/mha_fusion.hpp"
-#include "ngraph_transformations/convert_to_interaction.hpp"
-#include "ngraph_transformations/convert_fq_rnn_to_quantized_rnn.hpp"
-#include "ngraph_transformations/move_eltwise_up_data_movement.hpp"
-#include "ngraph_transformations/swap_convert_transpose.hpp"
+#include "transformations/cpu_opset/convert_to_cpu_specific_opset.hpp"
+#include "transformations/snippets/x64/pass/snippets_mark_skipped.hpp"
+#include "transformations/cpu_opset/x64/pass/mha_fusion.hpp"
+#include "transformations/cpu_opset/x64/pass/convert_to_interaction.hpp"
+#include "transformations/cpu_opset/common/pass/convert_fq_rnn_to_quantized_rnn.hpp"
+#include "transformations/cpu_opset/common/pass/move_eltwise_up_data_movement.hpp"
+#include "transformations/cpu_opset/common/pass/swap_convert_transpose.hpp"
 
 // Snippets
 #include "snippets/pass/tokenization.hpp"
@@ -236,8 +237,8 @@ void Transformations::PreLpt(const std::vector<ov::element::Type>& defaultPrecis
     manager.register_pass<ov::pass::ConvertPrecision>(precisions, type_to_fuse);
     manager.register_pass<ov::pass::EliminateConvert>();
     manager.register_pass<SwapConvertTranspose>();
-    manager.register_pass<ConvertToInteraction>();
-    manager.register_pass<ConvertInteractionInt8>();
+    OV_CPU_REGISTER_PASS_X64(manager, ConvertToInteraction);
+    OV_CPU_REGISTER_PASS_X64(manager, ConvertInteractionInt8);
 
     auto pass_config = manager.get_pass_config();
 
@@ -521,11 +522,11 @@ void Transformations::PostLpt() {
     postLPTPassManager.register_pass<ov::pass::ConstantFolding>();
 
     // Snippets may brake MHA patterns so the fusion has to performed before
-    postLPTPassManager.register_pass<MHAFusion>();
-    postLPTPassManager.register_pass<FuseFQtoInteraction>();
-    postLPTPassManager.get_pass_config()->set_callback<MHAFloatFusion, MHAFloatFusion2,
-                                                       MHAQuantFusion, MHAQuantFusion2>
-        ([this](const std::shared_ptr<const ov::Node>& n) -> bool {
+    OV_CPU_REGISTER_PASS_X64(postLPTPassManager, MHAFusion);
+    OV_CPU_REGISTER_PASS_X64(postLPTPassManager, FuseFQtoInteraction);
+
+    OV_CPU_SET_CALLBACK_X64(postLPTPassManager,
+         ([this](const std::shared_ptr<const ov::Node>& n) -> bool {
             std::string errorMessage;
 
             if (!node::MHA::isSupportedOperation(n, errorMessage))
@@ -541,12 +542,13 @@ void Transformations::PostLpt() {
             }
 
             return false;
-        });
+        }),
+    MHAFloatFusion, MHAFloatFusion2, MHAQuantFusion, MHAQuantFusion2);
 
     // Float MHA is supported by snippets now
     if (!enableBF16) {
-        postLPTPassManager.get_pass_config()->disable<MHAFloatFusion>();
-        postLPTPassManager.get_pass_config()->disable<MHAFloatFusion2>();
+        OV_CPU_DISABLE_PASS_X64(postLPTPassManager, MHAFloatFusion);
+        OV_CPU_DISABLE_PASS_X64(postLPTPassManager, MHAFloatFusion2);
     }
 
     // Execute before snippets. Otherwise FQ will be converted to Subgraph

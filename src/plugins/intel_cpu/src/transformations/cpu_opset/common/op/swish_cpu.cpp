@@ -3,7 +3,7 @@
 //
 
 #include "swish_cpu.hpp"
-#include "../itt.hpp"
+#include "transformations/itt.hpp"
 
 ov::intel_cpu::SwishNode::SwishNode(const ngraph::Output<ngraph::Node> & input, const float alpha)
         : Op({input}), m_alpha(alpha) {

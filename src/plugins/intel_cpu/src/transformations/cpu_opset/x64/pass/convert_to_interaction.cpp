@@ -13,7 +13,7 @@
 
 #include "itt.hpp"
 #include "ov_ops/type_relaxed.hpp"
-#include "op/interaction.hpp"
+#include "../op/interaction.hpp"
 #include "simplify_fakequantize.hpp"
 
 ov::intel_cpu::ConvertToInteraction::ConvertToInteraction() {

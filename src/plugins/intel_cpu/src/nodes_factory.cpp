@@ -172,7 +172,7 @@ Node::NodesFactory::NodesFactory()
     INTEL_CPU_NODE(PriorBoxClustered, Type::PriorBoxClustered);
     INTEL_CPU_NODE(Eye, Type::Eye);
     INTEL_CPU_NODE(Unique, Type::Unique);
-#if defined(OV_CPU_X64)
+#if defined(OPENVINO_ARCH_X86_64)
     INTEL_CPU_NODE(Gather, Type::Gather);
     INTEL_CPU_NODE(GridSample, Type::GridSample);
     INTEL_CPU_NODE(DeformableConvolution, Type::DeformableConvolution);

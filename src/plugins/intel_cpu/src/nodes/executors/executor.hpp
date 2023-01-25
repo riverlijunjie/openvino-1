@@ -23,7 +23,7 @@ namespace intel_cpu {
 #define OV_CPU_INSTANCE_DNNL(...)
 #endif
 
-#if defined(OV_CPU_X64)
+#if defined(OPENVINO_ARCH_X86_64)
 #define OV_CPU_INSTANCE_X64(...) \
     {__VA_ARGS__},
 #else

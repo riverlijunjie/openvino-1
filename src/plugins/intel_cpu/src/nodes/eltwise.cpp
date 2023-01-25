@@ -26,9 +26,9 @@
 
 #include "ngraph/ngraph.hpp"
 #include <ngraph/opsets/opset1.hpp>
-#include "ngraph_transformations/op/power_static.hpp"
-#include "ngraph_transformations/op/leaky_relu.hpp"
-#include "ngraph_transformations/op/swish_cpu.hpp"
+#include "transformations/cpu_opset/common/op/power_static.hpp"
+#include "transformations/cpu_opset/common/op/leaky_relu.hpp"
+#include "transformations/cpu_opset/common/op/swish_cpu.hpp"
 
 #include <string>
 #include <vector>

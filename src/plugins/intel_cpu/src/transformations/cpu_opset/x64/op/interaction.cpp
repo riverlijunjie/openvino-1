@@ -3,7 +3,7 @@
 //
 
 #include "interaction.hpp"
-#include "../itt.hpp"
+#include "transformations/itt.hpp"
 
 ov::intel_cpu::InteractionNode::InteractionNode(const OutputVector& args) :
     Op(args) {

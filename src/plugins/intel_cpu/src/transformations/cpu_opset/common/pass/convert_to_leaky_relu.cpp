@@ -7,7 +7,7 @@
 #include <ngraph/opsets/opset1.hpp>
 #include <ngraph/rt_info.hpp>
 #include <ngraph/pattern/op/wrap_type.hpp>
-#include "op/leaky_relu.hpp"
+#include "../op/leaky_relu.hpp"
 
 #include "itt.hpp"
 

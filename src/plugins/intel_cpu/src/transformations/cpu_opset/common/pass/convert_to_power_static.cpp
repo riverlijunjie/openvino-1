@@ -10,8 +10,8 @@
 #include <ngraph/rt_info.hpp>
 #include <ngraph/pattern/op/wrap_type.hpp>
 #include <ngraph/pattern/op/or.hpp>
-#include "op/power_static.hpp"
-#include "op/fully_connected.hpp"
+#include "../op/power_static.hpp"
+#include "../op/fully_connected.hpp"
 #include "utils/general_utils.h"
 
 #include "itt.hpp"

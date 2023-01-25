@@ -6,7 +6,7 @@
 
 #include "plugin.h"
 
-#include "transformation_pipeline.h"
+#include "transformations/transformation_pipeline.h"
 #include "itt.h"
 #include "extension_mngr.h"
 #include "extension.h"

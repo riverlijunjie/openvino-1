@@ -34,7 +34,7 @@ namespace ov {
 namespace intel_cpu {
 namespace node {
 
-#if defined(OV_CPU_X64)
+#if defined(OPENVINO_ARCH_X86_64)
 namespace {
 struct jit_has_subnormals_base : public jit_generator {
     DECLARE_CPU_JIT_AUX_FUNCTIONS(jit_has_subnormals_base)
@@ -285,7 +285,7 @@ void Input::cloneBlobIfRequired() {
 
     // The presence of subnormals is better to determined at IR read time.
     auto hasSubnormals = [&, this] () {
-#if defined(OV_CPU_X64)
+#if defined(OPENVINO_ARCH_X86_64)
         if (prec == InferenceEngine::Precision::FP32) {
             uint32_t const *u32data = constOp->get_data_ptr<uint32_t>();
 

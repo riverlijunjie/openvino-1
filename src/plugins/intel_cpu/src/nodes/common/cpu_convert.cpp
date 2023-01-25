@@ -14,7 +14,7 @@
 #include <tuple>
 #include <cmath>
 #include <onednn/dnnl.h>
-#if defined(OV_CPU_X64)
+#if defined(OPENVINO_ARCH_X86_64)
 #include "nodes/kernels/x64/jit_kernel.hpp"
 #include <cpu/x64/jit_generator.hpp>
 #endif
@@ -26,7 +26,7 @@ namespace ov {
 namespace intel_cpu {
 namespace {
 
-#if defined(OV_CPU_X64)
+#if defined(OPENVINO_ARCH_X86_64)
 
 using namespace dnnl::impl::utils;
 using namespace dnnl::impl::cpu::x64;
@@ -364,7 +364,7 @@ struct ConvertPrecision<std::tuple<ov::intel_cpu::bfloat16_t, float>> {
     }
 };
 
-#if defined(OV_CPU_X64)
+#if defined(OPENVINO_ARCH_X86_64)
 template<typename src_t>
 struct ConvertPrecision<std::tuple<src_t, ov::float16>> {
     void operator()(ConvertContext & ctx) {

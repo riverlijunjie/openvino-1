@@ -5,7 +5,7 @@
 #pragma once
 
 #include "ngraph/opsets/opset5.hpp"
-#include "ngraph_transformations/op/swish_cpu.hpp"
+#include "transformations/cpu_opset/common/op/swish_cpu.hpp"
 #include "jit_dnnl_emitters.hpp"
 
 namespace ov {

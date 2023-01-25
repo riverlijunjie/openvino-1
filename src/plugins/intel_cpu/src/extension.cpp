@@ -3,14 +3,14 @@
 //
 
 #include "extension.h"
-#include "ngraph_transformations/op/fully_connected.hpp"
-#include "ngraph_transformations/op/interaction.hpp"
-#include "ngraph_transformations/op/leaky_relu.hpp"
-#include "ngraph_transformations/op/power_static.hpp"
-#include "ngraph_transformations/op/swish_cpu.hpp"
-#include "ngraph_transformations/op/mha.hpp"
-#include "snippets_transformations/op/load_convert.hpp"
-#include "snippets_transformations/op/store_convert.hpp"
+#include "transformations/cpu_opset/common/op/fully_connected.hpp"
+#include "transformations/cpu_opset/common/op/leaky_relu.hpp"
+#include "transformations/cpu_opset/common/op/power_static.hpp"
+#include "transformations/cpu_opset/common/op/swish_cpu.hpp"
+#include "transformations/cpu_opset/x64/op/mha.hpp"
+#include "transformations/cpu_opset/x64/op/interaction.hpp"
+#include "transformations/snippets/x64/op/load_convert.hpp"
+#include "transformations/snippets/x64/op/store_convert.hpp"
 
 #include <ngraph/ngraph.hpp>
 #include <ov_ops/augru_cell.hpp>
@@ -43,17 +43,19 @@ std::map<std::string, ngraph::OpSet> Extension::getOpSets() {
     auto cpu_plugin_opset = []() {
         ngraph::OpSet opset;
 
+#if defined(OPENVINO_ARCH_X86_64)
+#define NGRAPH_OP_X64(NAME, NAMESPACE) NGRAPH_OP(NAME, NAMESPACE)
+#else
+#define NGRAPH_OP_X64(NAME, NAMESPACE)
+#endif
+
 #define NGRAPH_OP(NAME, NAMESPACE) opset.insert<NAMESPACE::NAME>();
-        NGRAPH_OP(InteractionNode, ov::intel_cpu)
         NGRAPH_OP(FullyConnectedNode, ov::intel_cpu)
         NGRAPH_OP(LeakyReluNode, ov::intel_cpu)
         NGRAPH_OP(PowerStaticNode, ov::intel_cpu)
         NGRAPH_OP(SwishNode, ov::intel_cpu)
-        NGRAPH_OP(MHANode, ov::intel_cpu)
-        NGRAPH_OP(LoadConvertSaturation, ov::intel_cpu)
-        NGRAPH_OP(LoadConvertTruncation, ov::intel_cpu)
-        NGRAPH_OP(StoreConvertSaturation, ov::intel_cpu)
-        NGRAPH_OP(StoreConvertTruncation, ov::intel_cpu)
+        NGRAPH_OP_X64(MHANode, ov::intel_cpu)
+        NGRAPH_OP_X64(InteractionNode, ov::intel_cpu)
 #undef NGRAPH_OP
 
         return opset;
@@ -151,6 +153,10 @@ std::map<std::string, ngraph::OpSet> Extension::getOpSets() {
         NGRAPH_OP(Store, ngraph::snippets::op)
         NGRAPH_OP(Subgraph, ngraph::snippets::op)
         NGRAPH_OP(VectorBuffer, ngraph::snippets::op)
+        NGRAPH_OP_X64(LoadConvertSaturation, ov::intel_cpu)
+        NGRAPH_OP_X64(LoadConvertTruncation, ov::intel_cpu)
+        NGRAPH_OP_X64(StoreConvertSaturation, ov::intel_cpu)
+        NGRAPH_OP_X64(StoreConvertTruncation, ov::intel_cpu)
 #undef NGRAPH_OP
 
         return opset;

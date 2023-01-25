@@ -42,7 +42,7 @@ public:
                                         const dnnl::primitive_attr &attr) {
         auto build = [&](const MVNExecutorDesc* desc) {
             switch (desc->implType) {
-#if defined(OV_CPU_X64)
+#if defined(OPENVINO_ARCH_X86_64)
                 case impl_desc_type::jit_uni: {
                     auto builder = [&](const JitMVNExecutor::Key& key) -> MVNExecutorPtr {
                         auto executor = desc->builder->makeExecutor();

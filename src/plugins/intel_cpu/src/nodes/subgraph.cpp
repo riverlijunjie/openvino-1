@@ -23,8 +23,8 @@
 #include <snippets/op/subgraph.hpp>
 #include "emitters/x64/cpu_generator.hpp"
 #include "utils/cpu_utils.hpp"
-#include "snippets_transformations/fuse_load_store_and_convert.hpp"
-#include "ngraph_transformations/convert_to_swish_cpu.hpp"
+#include "transformations/snippets/x64/pass/fuse_load_store_and_convert.hpp"
+#include "transformations/cpu_opset/common/pass/convert_to_swish_cpu.hpp"
 
 using namespace InferenceEngine;
 using namespace dnnl::impl::utils;

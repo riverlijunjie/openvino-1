@@ -3,7 +3,7 @@
 //
 
 #include "mha.hpp"
-#include "../itt.hpp"
+#include "transformations/itt.hpp"
 #include <ngraph/opsets/opset3.hpp>
 #include <matmul_shape_inference.hpp>
 

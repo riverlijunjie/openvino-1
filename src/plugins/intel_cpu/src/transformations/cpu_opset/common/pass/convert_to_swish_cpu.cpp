@@ -7,7 +7,7 @@
 #include <ngraph/opsets/opset4.hpp>
 #include <ngraph/rt_info.hpp>
 #include <ngraph/pattern/op/wrap_type.hpp>
-#include "op/swish_cpu.hpp"
+#include "../op/swish_cpu.hpp"
 
 #include "itt.hpp"
 

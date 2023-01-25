@@ -14,7 +14,7 @@
 #include "emitters/x64/jit_dnnl_emitters.hpp"
 #include "emitters/x64/jit_load_store_emitters.hpp"
 #include "common/cpu_convert.h"
-#include "ngraph_transformations/op/mha.hpp"
+#include "transformations/cpu_opset/x64/op/mha.hpp"
 #include "dnnl_extension_utils.h"
 #include <ie_ngraph_utils.hpp>
 

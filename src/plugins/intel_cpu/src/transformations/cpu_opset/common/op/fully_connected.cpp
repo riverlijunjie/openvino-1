@@ -3,7 +3,7 @@
 //
 
 #include "fully_connected.hpp"
-#include "../itt.hpp"
+#include "transformations/itt.hpp"
 
 ov::intel_cpu::FullyConnectedNode::FullyConnectedNode(const ngraph::Output<Node>& A,
                                                      const ngraph::Output<Node>& B,

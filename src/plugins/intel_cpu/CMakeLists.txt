@@ -32,13 +32,8 @@ if (WIN32)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DNOMINMAX")
 endif()
 
-if(X86_64)
-    add_definitions(-DOV_CPU_X64)
-    set(OV_CPU_X64 ON)
-elseif(AARCH64)
-    add_definitions(-DOV_CPU_AARCH64)
-    set(OV_CPU_AARCH64 ON)
-elseif(X86 OR RISCV64)
+
+if(X86_64 OR X86 OR AARCH64 OR RISCV64)
     # nothing for now
 else()
     message(FATAL_ERROR "Unsupported system processor ${CMAKE_SYSTEM_PROCESSOR}")
@@ -78,7 +73,7 @@ if (NOT OV_CPU_WITH_ACL)
     list(REMOVE_ITEM HEADERS ${HEADERS_TO_REMOVE})
 endif()
 
-if (NOT OV_CPU_X64)
+if (NOT X86_64)
     file(GLOB_RECURSE SOURCES_TO_REMOVE ${CMAKE_CURRENT_SOURCE_DIR}/src/nodes/executors/x64/*.cpp)
     file(GLOB_RECURSE HEADERS_TO_REMOVE ${CMAKE_CURRENT_SOURCE_DIR}/src/nodes/executors/x64/*.h
                                         ${CMAKE_CURRENT_SOURCE_DIR}/src/nodes/executors/x64/*.hpp)

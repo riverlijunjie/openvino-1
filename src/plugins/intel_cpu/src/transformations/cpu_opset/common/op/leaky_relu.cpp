@@ -3,7 +3,7 @@
 //
 
 #include "leaky_relu.hpp"
-#include "../itt.hpp"
+#include "transformations/itt.hpp"
 
 ov::intel_cpu::LeakyReluNode::LeakyReluNode(const ngraph::Output<ngraph::Node> &data,
                                            const float &negative_slope,

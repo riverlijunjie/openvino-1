@@ -11,7 +11,7 @@
 #include "jit_emitter.hpp"
 #include "jit_load_store_emitters.hpp"
 
-#include "snippets_transformations/op/store_convert.hpp"
+#include "transformations/snippets/x64/op/store_convert.hpp"
 // Matmul support:
 #include <cpu/x64/brgemm/brgemm.hpp>
 #include <cpu/x64/matmul/brgemm_matmul_copy_utils.hpp>

@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-#include "ngraph_transformations/op/interaction.hpp"
+#include "transformations/cpu_opset/x64/op/interaction.hpp"
 #include "interaction.h"
 #include <onednn/dnnl.h>
 #include <dnnl_extension_utils.h>
