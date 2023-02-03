@@ -6,6 +6,7 @@
 
 #include "cpu_memory.h"
 #include "onednn/iml_type_mapper.h"
+#include "executor.hpp"
 
 namespace ov {
 namespace intel_cpu {
@@ -70,7 +71,7 @@ public:
 
 class EltwiseExecutor {
 public:
-    EltwiseExecutor();
+    EltwiseExecutor(const ExecutorContext::CPtr context);
     virtual bool init(const EltwiseAttrs& eltwiseAttrs,
                       const std::vector<MemoryDescPtr>& srcDescs,
                       const std::vector<MemoryDescPtr>& dstDescs,
@@ -83,6 +84,7 @@ public:
 
 protected:
     EltwiseAttrs eltwiseAttrs;
+    const ExecutorContext::CPtr context;
 };
 
 using EltwiseExecutorPtr = std::shared_ptr<EltwiseExecutor>;
@@ -92,7 +94,7 @@ class EltwiseExecutorBuilder {
 public:
     ~EltwiseExecutorBuilder() = default;
     virtual bool isSupported(const EltwiseAttrs& eltwiseAttrs, const std::vector<MemoryDescPtr>& srcDescs, const std::vector<MemoryDescPtr>& dstDescs) const = 0;
-    virtual EltwiseExecutorPtr makeExecutor() const = 0;
+    virtual EltwiseExecutorPtr makeExecutor(const ExecutorContext::CPtr context) const = 0;
 };
 
 using EltwiseExecutorBuilderPtr = std::shared_ptr<EltwiseExecutorBuilder>;

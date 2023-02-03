@@ -6,6 +6,7 @@
 
 #include "cpu_memory.h"
 #include "onednn/iml_type_mapper.h"
+#include "executor.hpp"
 
 namespace ov {
 namespace intel_cpu {
@@ -25,7 +26,7 @@ struct MVNAttrs {
 
 class MVNExecutor {
 public:
-    MVNExecutor();
+    MVNExecutor(const ExecutorContext::CPtr context);
     virtual bool init(const MVNAttrs& mvnAttrs,
                       const std::vector<MemoryDescCPtr>& srcDescs,
                       const std::vector<MemoryDescCPtr>& dstDescs,
@@ -40,6 +41,7 @@ public:
 
 protected:
     MVNAttrs mvnAttrs;
+    const ExecutorContext::CPtr context;
 };
 
 using MVNExecutorPtr = std::shared_ptr<MVNExecutor>;
@@ -49,7 +51,7 @@ class MVNExecutorBuilder {
 public:
     ~MVNExecutorBuilder() = default;
     virtual bool isSupported(const MVNAttrs& mvnAttrs, const std::vector<MemoryDescCPtr>& srcDescs, const std::vector<MemoryDescCPtr>& dstDescs) const = 0;
-    virtual MVNExecutorPtr makeExecutor() const = 0;
+    virtual MVNExecutorPtr makeExecutor(const ExecutorContext::CPtr context) const = 0;
 };
 
 using MVNExecutorBuilderPtr = std::shared_ptr<MVNExecutorBuilder>;

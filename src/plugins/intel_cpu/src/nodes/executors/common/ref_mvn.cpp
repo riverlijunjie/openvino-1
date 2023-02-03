@@ -9,7 +9,7 @@
 namespace ov {
 namespace intel_cpu {
 
-RefMVNExecutor::RefMVNExecutor() : MVNExecutor() {}
+RefMVNExecutor::RefMVNExecutor(const ExecutorContext::CPtr context) : MVNExecutor(context) {}
 
 bool RefMVNExecutor::init(const MVNAttrs& mvnAttrs,
                           const std::vector<MemoryDescCPtr>& srcDescs,

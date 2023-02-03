@@ -5,6 +5,8 @@
 #pragma once
 
 #include "cache/multi_cache.h"
+#include "graph_context.h"
+#include "onednn/iml_type_mapper.h"
 
 namespace ov {
 namespace intel_cpu {
@@ -41,16 +43,47 @@ enum class ExecutorType {
     Acl
 };
 
-class ExecutorFactory {
+class ExecutorContext {
 public:
-    ExecutorFactory() = default;
-    ~ExecutorFactory() = default;
+    typedef std::shared_ptr<ExecutorContext> Ptr;
+    typedef std::shared_ptr<const ExecutorContext> CPtr;
 
-    virtual void setRuntimeCache(const MultiCachePtr& cache) {
-        runtimeCache = cache;
+    ExecutorContext(const GraphContext::CPtr graphContext, const std::vector<impl_desc_type>& implPriorities) {
+        this->runtimeCache = graphContext->getParamsCache();
+        this->scratchPad = graphContext->getScratchPad();
+        this->engine = graphContext->getEngine();
+        this->implPriorities = implPriorities;
     }
 
+    MultiCachePtr getRuntimeCache() const {
+        return runtimeCache;
+    }
+
+    DnnlScratchPadPtr getScratchPad() const {
+        return scratchPad;
+    }
+
+    dnnl::engine getEngine() const {
+        return engine;
+    }
+
+    const std::vector<impl_desc_type>& getImplPriorities() const {
+        return implPriorities;
+    }
+
+private:
     MultiCachePtr runtimeCache = nullptr;
+    DnnlScratchPadPtr scratchPad = nullptr;
+    dnnl::engine engine;
+    std::vector<impl_desc_type> implPriorities = {};
+};
+
+class ExecutorFactory {
+public:
+    ExecutorFactory(const ExecutorContext::CPtr context) : context(context) {};
+    virtual ~ExecutorFactory() = default;
+
+    ExecutorContext::CPtr context;
 };
 
 using ExecutorFactoryPtr = std::shared_ptr<ExecutorFactory>;

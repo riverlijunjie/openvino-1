@@ -817,7 +817,7 @@ static void offset_in_calc(VectorDims& offset, const VectorDims& dims_in, const 
     }
 }
 
-JitEltwiseExecutor::JitEltwiseExecutor() : EltwiseExecutor() {}
+JitEltwiseExecutor::JitEltwiseExecutor(const ExecutorContext::CPtr context) : EltwiseExecutor(context) {}
 
 bool JitEltwiseExecutor::init(const EltwiseAttrs& eltwiseAttrs,
                               const std::vector<MemoryDescPtr>& srcDescs,

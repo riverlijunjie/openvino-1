@@ -17,7 +17,7 @@ namespace intel_cpu {
 
 class DnnlMatMulExecutor : public MatMulExecutor {
 public:
-    DnnlMatMulExecutor();
+    DnnlMatMulExecutor(const ExecutorContext::CPtr context);
 
     bool init(const MatMulAttrs& matmulAttrs,
               const std::vector<MemoryDescPtr>& srcDescs,
@@ -134,8 +134,8 @@ public:
         return true;
     }
 
-    MatMulExecutorPtr makeExecutor() const override {
-        return std::make_shared<DnnlMatMulExecutor>();
+    MatMulExecutorPtr makeExecutor(const ExecutorContext::CPtr context) const override {
+        return std::make_shared<DnnlMatMulExecutor>(context);
     }
 };
 

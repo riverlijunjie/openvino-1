@@ -13,8 +13,6 @@
 
 #include "dnnl/dnnl_matmul.hpp"
 
-#include "onednn/iml_type_mapper.h"
-
 namespace ov {
 namespace intel_cpu {
 
@@ -30,7 +28,8 @@ public:
     MatMulExecutorFactory(const MatMulAttrs& MatMulAttrs,
                           const std::vector<MemoryDescPtr>& srcDescs,
                           const std::vector<MemoryDescPtr>& dstDescs,
-                          const dnnl::primitive_attr &attr) : ExecutorFactory() {
+                          const dnnl::primitive_attr &attr,
+                          const ExecutorContext::CPtr context) : ExecutorFactory(context) {
         for (auto& desc : getMatMulExecutorsList()) {
             if (desc.builder->isSupported(MatMulAttrs, srcDescs, dstDescs, attr)) {
                 supportedDescs.push_back(desc);
@@ -47,10 +46,7 @@ public:
             switch (desc->executorType) {
                 case ExecutorType::x64: {
                     auto builder = [&](const DnnlMatMulExecutor::Key& key) -> MatMulExecutorPtr {
-                        auto executor = desc->builder->makeExecutor();
-                        executor->setEngine(engine);
-                        executor->setScratchPad(scratchPad);
-                        executor->setImplPriorities(implPriorities);
+                        auto executor = desc->builder->makeExecutor(context);
                         if (executor->init(MatMulAttrs, srcDescs, dstDescs, attr)) {
                             return executor;
                         } else {
@@ -59,14 +55,11 @@ public:
                     };
 
                     auto key = DnnlMatMulExecutor::Key(MatMulAttrs, srcDescs, dstDescs, attr);
-                    auto res = runtimeCache->getOrCreate(key, builder);
+                    auto res = context->getRuntimeCache()->getOrCreate(key, builder);
                     return res.first;
                 } break;
                 default: {
-                    auto executor = desc->builder->makeExecutor();
-                    executor->setEngine(engine);
-                    executor->setScratchPad(scratchPad);
-                    executor->setImplPriorities(implPriorities);
+                    auto executor = desc->builder->makeExecutor(context);
 
                     if (executor->init(MatMulAttrs, srcDescs, dstDescs, attr)) {
                         return executor;
@@ -103,17 +96,11 @@ public:
         this->scratchPad = scratchPad;
     }
 
-    void setImplPriorities(const std::vector<impl_desc_type>& implPriorities) {
-        this->implPriorities = implPriorities;
-    }
-
 private:
     // TODO: remove dnnl dependency
     dnnl::engine engine;
 
     DnnlScratchPadPtr scratchPad = nullptr;
-
-    std::vector<impl_desc_type> implPriorities;
 
     std::vector<MatMulExecutorDesc> supportedDescs;
     const MatMulExecutorDesc* chosenDesc = nullptr;

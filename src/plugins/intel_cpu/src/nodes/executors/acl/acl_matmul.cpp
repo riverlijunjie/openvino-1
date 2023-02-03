@@ -28,7 +28,7 @@ inline Dim vectorProduct(const VectorDims& vec, size_t size) {
     return prod;
 }
 
-AclMatMulExecutor::AclMatMulExecutor() : MatMulExecutor() {}
+AclMatMulExecutor::AclMatMulExecutor(const ExecutorContext::CPtr context) : MatMulExecutor(context) {}
 
 bool AclMatMulExecutor::init(const MatMulAttrs& matmulAttrs,
                              const std::vector<MemoryDescPtr>& srcDescs,

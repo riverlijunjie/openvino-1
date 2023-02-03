@@ -9,7 +9,7 @@ namespace intel_cpu {
 
 using namespace InferenceEngine;
 
-MVNExecutor::MVNExecutor() {}
+MVNExecutor::MVNExecutor(const ExecutorContext::CPtr context) : context(context) {}
 
 SizeVector MVNExecutor::transformTo5DCase(const SizeVector& shape, bool initAcrossChannels) {
     switch (shape.size()) {

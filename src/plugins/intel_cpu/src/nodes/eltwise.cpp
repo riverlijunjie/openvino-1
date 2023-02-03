@@ -727,8 +727,8 @@ void Eltwise::initSupportedPrimitiveDescriptors() {
             dstMemoryDescs.push_back(config.outConfs[i].getMemDesc());
         }
 
-        auto factory = std::make_shared<EltwiseExecutorFactory>(eltwiseAttrs, srcMemoryDescs, dstMemoryDescs);
-        factory->setRuntimeCache(context->getParamsCache());
+        auto factory = std::make_shared<EltwiseExecutorFactory>(eltwiseAttrs, srcMemoryDescs, dstMemoryDescs,
+                                                                std::make_shared<ExecutorContext>(context, getPrimitivesPriority()));
 
         return {config, impl_desc_type::undef, factory};
     };

@@ -1007,7 +1007,7 @@ private:
 };
 //////////////////////////////////////////////////////////////////////////////////
 
-JitMVNExecutor::JitMVNExecutor() : MVNExecutor() {}
+JitMVNExecutor::JitMVNExecutor(const ExecutorContext::CPtr context) : MVNExecutor(context) {}
 
 bool JitMVNExecutor::init(const MVNAttrs& mvnAttrs,
                           const std::vector<MemoryDescCPtr>& srcDescs,

@@ -76,7 +76,7 @@ struct jit_uni_mvn_kernel {
 
 class JitMVNExecutor : public MVNExecutor {
 public:
-    JitMVNExecutor();
+    JitMVNExecutor(const ExecutorContext::CPtr context);
 
     bool init(const MVNAttrs& mvnAttrs,
               const std::vector<MemoryDescCPtr>& srcDescs,
@@ -124,8 +124,8 @@ public:
         return dnnl::impl::cpu::x64::mayiuse(dnnl::impl::cpu::x64::sse41);
     }
 
-    MVNExecutorPtr makeExecutor() const override {
-        return std::make_shared<JitMVNExecutor>();
+    MVNExecutorPtr makeExecutor(const ExecutorContext::CPtr context) const override {
+        return std::make_shared<JitMVNExecutor>(context);
     }
 };
 

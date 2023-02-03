@@ -9,7 +9,7 @@ namespace intel_cpu {
 
 using namespace InferenceEngine;
 
-EltwiseExecutor::EltwiseExecutor() {}
+EltwiseExecutor::EltwiseExecutor(const ExecutorContext::CPtr context) : context(context) {}
 
 }   // namespace intel_cpu
 }   // namespace ov

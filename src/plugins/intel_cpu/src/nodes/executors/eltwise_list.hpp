@@ -27,7 +27,8 @@ class EltwiseExecutorFactory : public ExecutorFactory {
 public:
     EltwiseExecutorFactory(const EltwiseAttrs& eltwiseAttrs,
                        const std::vector<MemoryDescPtr>& srcDescs,
-                       const std::vector<MemoryDescPtr>& dstDescs) : ExecutorFactory() {
+                       const std::vector<MemoryDescPtr>& dstDescs,
+                       const ExecutorContext::CPtr context) : ExecutorFactory(context) {
         for (auto& desc : getEltwiseExecutorsList()) {
             if (desc.builder->isSupported(eltwiseAttrs, srcDescs, dstDescs)) {
                 supportedDescs.push_back(desc);
@@ -57,7 +58,7 @@ public:
                 //     return res.first;
                 // } break;
                 default: {
-                    auto executor = desc->builder->makeExecutor();
+                    auto executor = desc->builder->makeExecutor(context);
                     if (executor->init(eltwiseAttrs, srcDescs, dstDescs, postOps)) {
                         return executor;
                     }

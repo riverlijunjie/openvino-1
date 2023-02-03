@@ -15,7 +15,7 @@ arm_compute::TensorShape shapeCast(const VectorDims& dims);
 
 class AclMatMulExecutor : public MatMulExecutor {
 public:
-    AclMatMulExecutor();
+    AclMatMulExecutor(const ExecutorContext::CPtr context);
 
     bool init(const MatMulAttrs& matmulAttrs,
               const std::vector<MemoryDescPtr>& srcDescs,
@@ -61,8 +61,8 @@ public:
         return true;
     }
 
-    MatMulExecutorPtr makeExecutor() const override {
-        return std::make_shared<AclMatMulExecutor>();
+    MatMulExecutorPtr makeExecutor(const ExecutorContext::CPtr context) const override {
+        return std::make_shared<AclMatMulExecutor>(context);
     }
 };
 

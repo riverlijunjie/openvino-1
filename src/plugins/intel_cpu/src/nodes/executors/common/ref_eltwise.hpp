@@ -11,7 +11,7 @@ namespace intel_cpu {
 
 class RefEltwiseExecutor : public EltwiseExecutor {
 public:
-    RefEltwiseExecutor();
+    RefEltwiseExecutor(const ExecutorContext::CPtr context);
 
     bool init(const EltwiseAttrs& eltwiseAttrs,
               const std::vector<MemoryDescPtr>& srcDescs,
@@ -43,8 +43,8 @@ public:
         return true;
     }
 
-    EltwiseExecutorPtr makeExecutor() const override {
-        return std::make_shared<RefEltwiseExecutor>();
+    EltwiseExecutorPtr makeExecutor(const ExecutorContext::CPtr context) const override {
+        return std::make_shared<RefEltwiseExecutor>(context);
     }
 };
 

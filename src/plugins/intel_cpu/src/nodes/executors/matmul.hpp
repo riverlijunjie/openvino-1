@@ -6,7 +6,7 @@
 
 #include "cpu_memory.h"
 #include "onednn/iml_type_mapper.h"
-#include "dnnl_scratch_pad.h"
+#include "executor.hpp"
 
 namespace ov {
 namespace intel_cpu {
@@ -19,7 +19,7 @@ struct MatMulAttrs {
 
 class MatMulExecutor {
 public:
-    MatMulExecutor();
+    MatMulExecutor(const ExecutorContext::CPtr context);
     virtual bool init(const MatMulAttrs& mvnAttrs,
                       const std::vector<MemoryDescPtr>& srcDescs,
                       const std::vector<MemoryDescPtr>& dstDescs,
@@ -30,24 +30,9 @@ public:
 
     virtual impl_desc_type getImplType() const = 0;
 
-    void setEngine(const dnnl::engine& engine) {
-        this->engine = engine;
-    }
-
-    void setScratchPad(const DnnlScratchPadPtr& scratchPad) {
-        this->scratchPad = scratchPad;
-    }
-
-    void setImplPriorities(const std::vector<impl_desc_type>& implPriorities) {
-        this->implPriorities = implPriorities;
-    }
-
 protected:
     MatMulAttrs mvnAttrs;
-
-    dnnl::engine engine;
-    std::vector<impl_desc_type> implPriorities;
-    DnnlScratchPadPtr scratchPad = nullptr;
+    const ExecutorContext::CPtr context;
 };
 
 using MatMulExecutorPtr = std::shared_ptr<MatMulExecutor>;
@@ -60,7 +45,7 @@ public:
                              const std::vector<MemoryDescPtr>& srcDescs,
                              const std::vector<MemoryDescPtr>& dstDescs,
                              const dnnl::primitive_attr &attr) const = 0;
-    virtual MatMulExecutorPtr makeExecutor() const = 0;
+    virtual MatMulExecutorPtr makeExecutor(const ExecutorContext::CPtr context) const = 0;
 };
 
 using MatMulExecutorBuilderPtr = std::shared_ptr<MatMulExecutorBuilder>;

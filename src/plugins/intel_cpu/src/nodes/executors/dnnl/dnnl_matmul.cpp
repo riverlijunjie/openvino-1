@@ -11,22 +11,22 @@
 namespace ov {
 namespace intel_cpu {
 
-DnnlMatMulExecutor::DnnlMatMulExecutor() : MatMulExecutor() {}
+DnnlMatMulExecutor::DnnlMatMulExecutor(const ExecutorContext::CPtr context) : MatMulExecutor(context) {}
 
 bool DnnlMatMulExecutor::init(const MatMulAttrs& matmulAttrs,
                               const std::vector<MemoryDescPtr>& srcDescs,
                               const std::vector<MemoryDescPtr>& dstDescs,
                               const dnnl::primitive_attr &attr) {
-    this->stream = dnnl::engine(engine);
+    this->stream = dnnl::engine(context->getEngine());
     this->matmulAttrs = matmulAttrs;
     auto localAttrs = dnnl::primitive_attr(attr.get()->clone());
     localAttrs.set_scratchpad_mode(dnnl::scratchpad_mode::user);
 
     auto desc = createDescriptor(matmulAttrs, srcDescs, dstDescs);
     dnnl::matmul::primitive_desc prim_desc;
-    if (!implPriorities.empty()) {
-        for (auto preferredImplType : implPriorities) {
-            dnnl::primitive_desc_iterator itpd = desc.createPrimitiveDescriptorIterator(engine, localAttrs);
+    if (!context->getImplPriorities().empty()) {
+        for (auto preferredImplType : context->getImplPriorities()) {
+            dnnl::primitive_desc_iterator itpd = desc.createPrimitiveDescriptorIterator(context->getEngine(), localAttrs);
             while (static_cast<bool>(itpd))  {
                 auto currentImplType = parse_impl_name(itpd.impl_info_str());
                 if (currentImplType == preferredImplType) {
@@ -42,7 +42,7 @@ bool DnnlMatMulExecutor::init(const MatMulAttrs& matmulAttrs,
             dnnl::matmul::primitive_desc prim_desc = itpd.get();
         }
     } else {
-        dnnl::primitive_desc_iterator itpd = desc.createPrimitiveDescriptorIterator(engine, localAttrs);
+        dnnl::primitive_desc_iterator itpd = desc.createPrimitiveDescriptorIterator(context->getEngine(), localAttrs);
         implType = parse_impl_name(itpd.impl_info_str());
         prim_desc = itpd.get();
     }
@@ -51,7 +51,7 @@ bool DnnlMatMulExecutor::init(const MatMulAttrs& matmulAttrs,
         return false;
 
     auto scratchpadMemoryDesc = DnnlExtensionUtils::makeDescriptor(prim_desc.query_md(dnnl::query::scratchpad_md));
-    scratchpadMemory = scratchPad->createScratchPadMem(scratchpadMemoryDesc);
+    scratchpadMemory = context->getScratchPad()->createScratchPadMem(scratchpadMemoryDesc);
 
     prim = std::make_shared<dnnl::matmul>(prim_desc);
 

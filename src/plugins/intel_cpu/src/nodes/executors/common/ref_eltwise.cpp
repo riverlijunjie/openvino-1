@@ -11,7 +11,7 @@
 namespace ov {
 namespace intel_cpu {
 
-RefEltwiseExecutor::RefEltwiseExecutor() : EltwiseExecutor() {}
+RefEltwiseExecutor::RefEltwiseExecutor(const ExecutorContext::CPtr context) : EltwiseExecutor(context) {}
 
 static void offset_out_calc(VectorDims& offset, const VectorDims& dims) {
     int k = 1;

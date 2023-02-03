@@ -63,7 +63,7 @@ struct jit_uni_eltwise_kernel {
 
 class JitEltwiseExecutor : public EltwiseExecutor {
 public:
-    JitEltwiseExecutor();
+    JitEltwiseExecutor(const ExecutorContext::CPtr context);
 
     bool init(const EltwiseAttrs& eltwiseAttrs,
               const std::vector<MemoryDescPtr>& srcDescs,
@@ -116,8 +116,8 @@ public:
         return dnnl::impl::cpu::x64::mayiuse(dnnl::impl::cpu::x64::sse41);
     }
 
-    EltwiseExecutorPtr makeExecutor() const override {
-        return std::make_shared<JitEltwiseExecutor>();
+    EltwiseExecutorPtr makeExecutor(const ExecutorContext::CPtr context) const override {
+        return std::make_shared<JitEltwiseExecutor>(context);
     }
 };
 

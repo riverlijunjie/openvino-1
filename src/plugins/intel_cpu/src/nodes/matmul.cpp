@@ -212,11 +212,8 @@ void MatMul::initSupportedPrimitiveDescriptors() {
     }
 
     auto attr = initPrimitiveAttr();
-    auto factory = std::make_shared<MatMulExecutorFactory>(matmulAttrs, srcMemoryDescs, dstMemoryDescs, *attr.get());
-    factory->setRuntimeCache(context->getParamsCache());
-    factory->setEngine(context->getEngine());
-    factory->setScratchPad(context->getScratchPad());
-    factory->setImplPriorities(getPrimitivesPriority());
+    auto factory = std::make_shared<MatMulExecutorFactory>(matmulAttrs, srcMemoryDescs, dstMemoryDescs, *attr.get(),
+                                                           std::make_shared<ExecutorContext>(context, getPrimitivesPriority()));
 
     supportedPrimitiveDescriptors.emplace_back(config, impl_desc_type::undef, factory);
 }

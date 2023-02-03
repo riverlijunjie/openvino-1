@@ -187,8 +187,8 @@ void MVN::initSupportedPrimitiveDescriptors() {
             dstMemoryDescs.push_back(config.outConfs[i].getMemDesc());
         }
 
-        auto factory = std::make_shared<MVNExecutorFactory>(mvnAttrs, srcMemoryDescs, dstMemoryDescs);
-        factory->setRuntimeCache(context->getParamsCache());
+        auto factory = std::make_shared<MVNExecutorFactory>(mvnAttrs, srcMemoryDescs, dstMemoryDescs,
+                                                            std::make_shared<ExecutorContext>(context, getPrimitivesPriority()));
         supportedPrimitiveDescriptors.push_back({config, impl_desc_type::undef, factory});
     };
 
