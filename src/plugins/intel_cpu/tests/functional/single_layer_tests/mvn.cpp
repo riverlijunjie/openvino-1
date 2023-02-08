@@ -281,19 +281,24 @@ std::vector<ElementType> inpPrc = {ElementType::i8, ElementType::bf16, ElementTy
 std::vector<ElementType> outPrc = {ElementType::bf16, ElementType::f32};
 
 std::vector<CPUSpecificParams> cpuParams_4D = {
+    #if defined(OPENVINO_ARCH_X86) || defined(OPENVINO_ARCH_X86_64)
        CPUSpecificParams({nhwc}, {nhwc}, {}, {}),
        CPUSpecificParams({nChw16c}, {nChw16c}, {}, {}),
+    #endif
        CPUSpecificParams({nchw}, {nchw}, {}, {})
 };
 
 std::vector<CPUSpecificParams> cpuParams_5D = {
+    #if defined(OPENVINO_ARCH_X86) || defined(OPENVINO_ARCH_X86_64)
        CPUSpecificParams({ndhwc}, {ndhwc}, {}, {}),
        CPUSpecificParams({nCdhw16c}, {nCdhw16c}, {}, {}),
+    #endif
        CPUSpecificParams({ncdhw}, {ncdhw}, {}, {})
 };
 
 std::vector<fusingSpecificParams> fusingParamsSet {
-       emptyFusingSpec,
+    emptyFusingSpec,
+    #if defined(OPENVINO_ARCH_X86) || defined(OPENVINO_ARCH_X86_64)
        /* activations */
        fusingRelu,
        fusingElu,
@@ -303,14 +308,18 @@ std::vector<fusingSpecificParams> fusingParamsSet {
        fusingFakeQuantizePerTensorRelu,
        /* another patterns */
        fusingAddPerTensor
+    #endif
 };
 
 std::vector<fusingSpecificParams> fusingParamsSetStaticShape {
+    emptyFusingSpec,
+    #if defined(OPENVINO_ARCH_X86) || defined(OPENVINO_ARCH_X86_64)
        /* FQ */
        fusingFakeQuantizePerChannel,
        fusingFakeQuantizePerChannelRelu,
        /* another patterns */
        fusingScaleShift,
+    #endif
 };
 
 const auto Mvn3D = ::testing::Combine(
@@ -360,11 +369,14 @@ INSTANTIATE_TEST_SUITE_P(smoke_CompareWithRefs_Mvn5D, MvnLayerCPUTest, Mvn5D, Mv
 
 // 1D 2D case
 std::vector<fusingSpecificParams> fusingUnaryEltwiseParamsSet {
+    emptyFusingSpec,
+    #if defined(OPENVINO_ARCH_X86) || defined(OPENVINO_ARCH_X86_64)
        /* activations */
        fusingRelu,
        fusingElu,
        fusingTanh,
        fusingSwish,
+    #endif
 };
 
 const auto Mvn1D = ::testing::Combine(
