@@ -106,9 +106,9 @@ public:
         return executorFactory;
     }
 
-    template <typename T>
-            // typename std::enable_if<!std::is_pointer<T>::value && !std::is_reference<T>::value, int>::type = 0,
-            // typename std::enable_if<std::is_base_of<ExecutorFactory, T>::value, int>::type = 0>
+    template <typename T,
+            typename std::enable_if<!std::is_pointer<T>::value && !std::is_reference<T>::value, int>::type = 0,
+            typename std::enable_if<std::is_base_of<ExecutorFactory, T>::value, int>::type = 0>
     std::shared_ptr<T> getExecutorFactoryAs() {
         auto casted = std::dynamic_pointer_cast<T>(executorFactory);
         if (!casted)

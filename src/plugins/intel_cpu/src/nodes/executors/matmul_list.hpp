@@ -55,7 +55,7 @@ public:
                     };
 
                     auto key = DnnlMatMulExecutor::Key(MatMulAttrs, srcDescs, dstDescs, attr);
-                    auto res = context->getRuntimeCache()->getOrCreate(key, builder);
+                    auto res = context->getRuntimeCache().lock()->getOrCreate(key, builder);
                     return res.first;
                 } break;
                 default: {
@@ -70,7 +70,6 @@ public:
             MatMulExecutorPtr ptr = nullptr;
             return ptr;
         };
-
 
         if (chosenDesc) {
             if (auto executor = build(chosenDesc)) {

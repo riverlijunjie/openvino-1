@@ -4,7 +4,7 @@
 
 #pragma once
 
-#include "../eltwise.hpp"
+#include "nodes/executors/eltwise.hpp"
 #include "cpu/x64/cpu_isa_traits.hpp"
 
 namespace ov {

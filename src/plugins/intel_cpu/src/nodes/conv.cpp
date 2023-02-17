@@ -346,7 +346,6 @@ const std::vector<impl_desc_type>& Convolution::getPrimitivesPriority() {
         impl_desc_type::gemm_avx2,
         impl_desc_type::gemm_avx,
         impl_desc_type::gemm_sse42,
-        impl_desc_type::gemm,
         impl_desc_type::jit_gemm,
         impl_desc_type::ref_any,
         impl_desc_type::ref,
@@ -575,13 +574,15 @@ void Convolution::getSupportedDescriptors() {
                 createDescriptor({ in_candidate }, { out_candidate });
             }
 
-            in_candidate = std::make_shared<DnnlBlockedMemoryDesc>(inputShape, inputDataType, nspc);
-            out_candidate = std::make_shared<DnnlBlockedMemoryDesc>(outputShape, outputDataType, nspc);
-            createDescriptor({ in_candidate }, { out_candidate });
-
             in_candidate = std::make_shared<DnnlBlockedMemoryDesc>(inputShape, inputDataType, ncsp);
             out_candidate = std::make_shared<DnnlBlockedMemoryDesc>(outputShape, outputDataType, ncsp);
             createDescriptor({ in_candidate }, { out_candidate });
+
+            if (!nspcAdded && (inputDataType != memory::data_type::bf16 && isNspcAvailable())) {
+                in_candidate = std::make_shared<DnnlBlockedMemoryDesc>(inputShape, inputDataType, nspc);
+                out_candidate = std::make_shared<DnnlBlockedMemoryDesc>(outputShape, outputDataType, nspc);
+                createDescriptor({ in_candidate }, { out_candidate });
+            }
         }
     }
 }
@@ -862,7 +863,7 @@ void Convolution::createDescriptor(const std::vector<MemoryDescPtr>& inputDesc,
 
     if (isWinograd())
         algorithms.push_back(dnnl::algorithm::convolution_winograd);
-    algorithms.push_back(dnnl::algorithm::convolution_auto);
+    algorithms.push_back(baseConvAlgorithm);
 
     updatePadding();
     for (auto alg : algorithms) {
@@ -1331,7 +1332,8 @@ void Convolution::prepareParams() {
                    selected_pd->getImplementationType()};
 
     auto engine = getEngine();
-    auto builder = [&engine](const ConvKey& key) -> executorPtr {
+    auto convAlg = baseConvAlgorithm;
+    auto builder = [&engine, convAlg](const ConvKey& key) -> executorPtr {
         auto createDnnlConvDesc = [](const dnnl::memory::desc& srcDesc,
                                      const dnnl::memory::desc& wghDesc,
                                      const dnnl::memory::desc& dstDesc,
@@ -1359,7 +1361,7 @@ void Convolution::prepareParams() {
                                                                             alg));
         };
 
-        const auto alg = (key.implType & impl_desc_type::winograd) ? dnnl::algorithm::convolution_winograd : dnnl::algorithm::convolution_auto;
+        const auto alg = (key.implType & impl_desc_type::winograd) ? dnnl::algorithm::convolution_winograd : convAlg;
         std::shared_ptr<DnnlDesriptor> desc = createDnnlConvDesc(key.inp0->getDnnlDesc(),
                                                                       key.inp1->getDnnlDesc(),
                                                                       key.out->getDnnlDesc(),
@@ -1410,7 +1412,7 @@ void Convolution::prepareParams() {
                                                                                   key.dilation,
                                                                                   key.paddingL,
                                                                                   key.paddingR,
-                                                                                  dnnl::algorithm::convolution_auto);
+                                                                                  convAlg);
 
             auto reordItpd = reorderConvDesc->createPrimitiveDescriptorIterator(engine, key.attr);
             if (static_cast<bool>(reordItpd)) {

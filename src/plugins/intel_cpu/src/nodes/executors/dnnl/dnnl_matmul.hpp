@@ -4,8 +4,7 @@
 
 #pragma once
 
-// TODO: remove relative path
-#include "../matmul.hpp"
+#include "nodes/executors/matmul.hpp"
 #include "dnnl.hpp"
 #include "dnnl_descriptor.h"
 #include "memory_desc/dnnl_blocked_memory_desc.h"

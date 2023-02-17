@@ -4,7 +4,7 @@
 
 #pragma once
 
-#include "mvn.hpp"
+#include "nodes/executors/mvn.hpp"
 #include "cpu/x64/cpu_isa_traits.hpp"
 
 namespace ov {

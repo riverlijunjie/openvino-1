@@ -277,42 +277,55 @@ const std::vector<double> epsilon = {
 
 const std::vector<ngraph::AxisSet> emptyReductionAxes = {{}};
 
-std::vector<ElementType> inpPrc = {ElementType::i8, ElementType::bf16, ElementType::f32};
-std::vector<ElementType> outPrc = {ElementType::bf16, ElementType::f32};
+std::vector<ElementType> inpPrc = {
+        ElementType::i8,
+        ElementType::f32,
+    #if defined(OPENVINO_ARCH_X86) || defined(OPENVINO_ARCH_X86_64)
+        ElementType::bf16
+    #endif
+};
+std::vector<ElementType> outPrc = {
+        ElementType::f32,
+    #if defined(OPENVINO_ARCH_X86) || defined(OPENVINO_ARCH_X86_64)
+        ElementType::bf16
+    #endif
+};
 
 std::vector<CPUSpecificParams> cpuParams_4D = {
+        CPUSpecificParams({nchw}, {nchw}, {}, {}),
     #if defined(OPENVINO_ARCH_X86) || defined(OPENVINO_ARCH_X86_64)
-       CPUSpecificParams({nhwc}, {nhwc}, {}, {}),
-       CPUSpecificParams({nChw16c}, {nChw16c}, {}, {}),
+        // TODO: enable nspc test cases for ARM
+        CPUSpecificParams({nhwc}, {nhwc}, {}, {}),
+        CPUSpecificParams({nChw16c}, {nChw16c}, {}, {})
     #endif
-       CPUSpecificParams({nchw}, {nchw}, {}, {})
 };
 
 std::vector<CPUSpecificParams> cpuParams_5D = {
+        CPUSpecificParams({ncdhw}, {ncdhw}, {}, {}),
     #if defined(OPENVINO_ARCH_X86) || defined(OPENVINO_ARCH_X86_64)
-       CPUSpecificParams({ndhwc}, {ndhwc}, {}, {}),
-       CPUSpecificParams({nCdhw16c}, {nCdhw16c}, {}, {}),
+        // TODO: enable nspc test cases for ARM
+        CPUSpecificParams({ndhwc}, {ndhwc}, {}, {}),
+        CPUSpecificParams({nCdhw16c}, {nCdhw16c}, {}, {})
     #endif
-       CPUSpecificParams({ncdhw}, {ncdhw}, {}, {})
 };
 
 std::vector<fusingSpecificParams> fusingParamsSet {
-    emptyFusingSpec,
+        emptyFusingSpec,
     #if defined(OPENVINO_ARCH_X86) || defined(OPENVINO_ARCH_X86_64)
-       /* activations */
-       fusingRelu,
-       fusingElu,
-       fusingTanh,
-       fusingSwish,
-       /* FQ */
-       fusingFakeQuantizePerTensorRelu,
-       /* another patterns */
-       fusingAddPerTensor
+        /* activations */
+        fusingRelu,
+        fusingElu,
+        fusingTanh,
+        fusingSwish,
+        /* FQ */
+        fusingFakeQuantizePerTensorRelu,
+        /* another patterns */
+        fusingAddPerTensor
     #endif
 };
 
 std::vector<fusingSpecificParams> fusingParamsSetStaticShape {
-    emptyFusingSpec,
+        emptyFusingSpec,
     #if defined(OPENVINO_ARCH_X86) || defined(OPENVINO_ARCH_X86_64)
        /* FQ */
        fusingFakeQuantizePerChannel,

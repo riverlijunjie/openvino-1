@@ -55,7 +55,7 @@ public:
         this->implPriorities = implPriorities;
     }
 
-    MultiCachePtr getRuntimeCache() const {
+    MultiCacheWeakPtr getRuntimeCache() const {
         return runtimeCache;
     }
 
@@ -72,7 +72,9 @@ public:
     }
 
 private:
-    MultiCachePtr runtimeCache = nullptr;
+    // weak_ptr is required to avoid cycle dependencies with MultiCache
+    // since ExecutorContext is stored in Executor itself
+    MultiCacheWeakPtr runtimeCache;
     DnnlScratchPadPtr scratchPad = nullptr;
     dnnl::engine engine;
     std::vector<impl_desc_type> implPriorities = {};
@@ -80,10 +82,10 @@ private:
 
 class ExecutorFactory {
 public:
-    ExecutorFactory(const ExecutorContext::CPtr context) : context(context) {};
+    ExecutorFactory(const ExecutorContext::CPtr context) : context(context) {}
     virtual ~ExecutorFactory() = default;
 
-    ExecutorContext::CPtr context;
+    const ExecutorContext::CPtr context;
 };
 
 using ExecutorFactoryPtr = std::shared_ptr<ExecutorFactory>;

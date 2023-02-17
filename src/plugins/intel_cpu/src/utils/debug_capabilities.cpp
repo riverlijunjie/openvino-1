@@ -76,12 +76,16 @@ DebugLogEnabled::DebugLogEnabled(const char* file, const char* func, int line, c
 void DebugLogEnabled::break_at(const std::string & log) {
     static const char* p_brk = std::getenv("OV_CPU_DEBUG_LOG_BRK");
     if (p_brk && log.find(p_brk) != std::string::npos) {
+#if defined(OPENVINO_ARCH_X86) || defined(OPENVINO_ARCH_X86_64)
         std::cout << "[ DEBUG ] " << " Debug log breakpoint hit" << std::endl;
 #if defined(_MSC_VER)
         __debugbreak();
 #else
         asm("int3");
 #endif
+#else
+    IE_THROW() << "OV_CPU_DEBUG_LOG_BRK env variable is not supported on non X64 architectures";
+#endif // defined(OPENVINO_ARCH_X86) || defined(OPENVINO_ARCH_X86_64)
     }
 }
 

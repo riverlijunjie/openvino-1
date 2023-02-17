@@ -72,7 +72,7 @@ else()
         # build_config=<file>
         # TODO: use data_type_support to disable useless kernels
         # TODO: switch to NHWC layout later
-        data_layout_support=nchw
+        data_layout_support=all
         build_dir=${ARM_COMPUTE_BINARY_DIR}
         install_dir=${ARM_COMPUTE_BINARY_DIR}/install
         arch=${ARM_COMPUTE_TARGET_ARCH}

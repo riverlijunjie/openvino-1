@@ -4,8 +4,7 @@
 
 #pragma once
 
-// TODO: remove relative path
-#include "../matmul.hpp"
+#include "nodes/executors/matmul.hpp"
 #include "arm_compute/runtime/NEON/NEFunctions.h"
 
 namespace ov {

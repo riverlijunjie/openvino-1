@@ -69,7 +69,6 @@ public:
             return ptr;
         };
 
-
         if (chosenDesc) {
             if (auto executor = build(chosenDesc)) {
                 return executor;

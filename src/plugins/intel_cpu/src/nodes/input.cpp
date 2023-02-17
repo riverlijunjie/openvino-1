@@ -285,13 +285,13 @@ void Input::cloneBlobIfRequired() {
 
     // The presence of subnormals is better to determined at IR read time.
     auto hasSubnormals = [&, this] () {
-#if defined(OPENVINO_ARCH_X86_64)
         if (prec == InferenceEngine::Precision::FP32) {
             uint32_t const *u32data = constOp->get_data_ptr<uint32_t>();
 
             if (!size)
                 return false;
 
+#if defined(OPENVINO_ARCH_X86_64)
             if (auto fn = jit_has_subnormals_function()) {
                 static const size_t batch_size = 2048;
                 const size_t iterations_num = size / batch_size + 1;
@@ -313,15 +313,15 @@ void Input::cloneBlobIfRequired() {
                 });
 
                 return has_subnormals;
-            } else {
-                for (size_t i = 0; i < size; ++i) {
-                    if (u32data[i] && (u32data[i] & (0xFF << 23)) == 0) {
-                        return true;
-                    }
+            }
+#endif
+
+            for (size_t i = 0; i < size; ++i) {
+                if (u32data[i] && (u32data[i] & (0xFF << 23)) == 0) {
+                    return true;
                 }
             }
         }
-#endif
         return false;
     };
 

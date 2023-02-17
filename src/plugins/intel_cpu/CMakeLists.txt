@@ -8,9 +8,6 @@ endif()
 
 set(TARGET_NAME "openvino_intel_cpu_plugin")
 
-# TODO: use 14 standart only for ARM build
-set(CMAKE_CXX_STANDARD 14)
-
 if(CMAKE_COMPILER_IS_GNUCC)
     ie_add_compiler_flags(-Wno-all)
 endif()
@@ -44,7 +41,8 @@ if (ENABLE_CPU_DEBUG_CAPS)
 endif()
 
 file(GLOB_RECURSE SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp)
-file(GLOB_RECURSE HEADERS ${CMAKE_CURRENT_SOURCE_DIR}/src/*.h(pp))
+file(GLOB_RECURSE HEADERS ${CMAKE_CURRENT_SOURCE_DIR}/src/*.h
+                          ${CMAKE_CURRENT_SOURCE_DIR}/src/*.hpp)
 
 addVersionDefines(${CMAKE_CURRENT_SOURCE_DIR}/src/plugin.cpp CI_BUILD_NUMBER)
 
@@ -64,37 +62,34 @@ if(DNNL_AARCH64_USE_ACL)
     set(OV_CPU_WITH_ACL ON)
 endif()
 
-if (NOT OV_CPU_WITH_ACL)
-    file(GLOB_RECURSE SOURCES_TO_REMOVE ${CMAKE_CURRENT_SOURCE_DIR}/src/nodes/executors/acl/*.cpp)
-    file(GLOB_RECURSE HEADERS_TO_REMOVE ${CMAKE_CURRENT_SOURCE_DIR}/src/nodes/executors/acl/*.h
-                                        ${CMAKE_CURRENT_SOURCE_DIR}/src/nodes/executors/acl/*.hpp)
+if(OV_CPU_WITH_ACL)
+    set(CMAKE_CXX_STANDARD 14)
+endif()
 
-    list(REMOVE_ITEM SOURCES ${SOURCES_TO_REMOVE})
-    list(REMOVE_ITEM HEADERS ${HEADERS_TO_REMOVE})
+# remove target specific files from compilation
+
+if (NOT OV_CPU_WITH_ACL)
+    set(EXCLUDE_PATHS ${EXCLUDE_PATHS}
+                      ${CMAKE_CURRENT_SOURCE_DIR}/src/nodes/executors/acl/*)
 endif()
 
 if (NOT X86_64)
-    file(GLOB_RECURSE SOURCES_TO_REMOVE ${CMAKE_CURRENT_SOURCE_DIR}/src/nodes/executors/x64/*.cpp)
-    file(GLOB_RECURSE HEADERS_TO_REMOVE ${CMAKE_CURRENT_SOURCE_DIR}/src/nodes/executors/x64/*.h
-                                        ${CMAKE_CURRENT_SOURCE_DIR}/src/nodes/executors/x64/*.hpp)
-
-    list(REMOVE_ITEM SOURCES ${SOURCES_TO_REMOVE})
-    list(REMOVE_ITEM HEADERS ${HEADERS_TO_REMOVE})
-
-    file(GLOB_RECURSE SOURCES_TO_REMOVE ${CMAKE_CURRENT_SOURCE_DIR}/src/emitters/x64/*.cpp)
-    file(GLOB_RECURSE HEADERS_TO_REMOVE ${CMAKE_CURRENT_SOURCE_DIR}/src/emitters/x64/*.h
-                                        ${CMAKE_CURRENT_SOURCE_DIR}/src/emitters/x64/*.hpp)
-
-    list(REMOVE_ITEM SOURCES ${SOURCES_TO_REMOVE})
-    list(REMOVE_ITEM HEADERS ${HEADERS_TO_REMOVE})
-
-    file(GLOB_RECURSE SOURCES_TO_REMOVE ${CMAKE_CURRENT_SOURCE_DIR}/src/nodes/kernels/x64/*.cpp)
-    file(GLOB_RECURSE HEADERS_TO_REMOVE ${CMAKE_CURRENT_SOURCE_DIR}/src/nodes/kernels/x64/*.h
-                                        ${CMAKE_CURRENT_SOURCE_DIR}/src/nodes/kernels/x64/*.hpp)
-
-    list(REMOVE_ITEM SOURCES ${SOURCES_TO_REMOVE})
-    list(REMOVE_ITEM HEADERS ${HEADERS_TO_REMOVE})
+    set(EXCLUDE_PATHS ${EXCLUDE_PATHS}
+                      ${CMAKE_CURRENT_SOURCE_DIR}/src/nodes/executors/x64/*
+                      ${CMAKE_CURRENT_SOURCE_DIR}/src/nodes/kernels/x64/*
+                      ${CMAKE_CURRENT_SOURCE_DIR}/src/emitters/x64/*
+                      ${CMAKE_CURRENT_SOURCE_DIR}/src/transformations/cpu_opset/x64/*
+                      ${CMAKE_CURRENT_SOURCE_DIR}/src/transformations/snippets/x64/*)
 endif()
+
+if (NOT AARCH64)
+    set(EXCLUDE_PATHS ${EXCLUDE_PATHS}
+                      ${CMAKE_CURRENT_SOURCE_DIR}/src/transformations/cpu_opset/arm/*)
+endif()
+
+file(GLOB_RECURSE FILES_TO_REMOVE ${EXCLUDE_PATHS})
+list(REMOVE_ITEM SOURCES ${FILES_TO_REMOVE})
+list(REMOVE_ITEM HEADERS ${FILES_TO_REMOVE})
 
 # create plugin
 
@@ -121,7 +116,6 @@ target_link_libraries(${TARGET_NAME} PRIVATE dnnl
 
 target_compile_definitions(${TARGET_NAME} PRIVATE IMPLEMENT_INFERENCE_EXTENSION_API)
 target_include_directories(${TARGET_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_include_directories(${TARGET_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/nodes/executors)
 
 target_include_directories(${TARGET_NAME} SYSTEM PRIVATE
     $<TARGET_PROPERTY:dnnl,INCLUDE_DIRECTORIES>)
@@ -155,8 +149,6 @@ if(BUILD_SHARED_LIBS)
             $<TARGET_PROPERTY:openvino::conditional_compilation,INTERFACE_INCLUDE_DIRECTORIES>)
 
     target_include_directories(${TARGET_NAME}_obj SYSTEM PUBLIC $<TARGET_PROPERTY:dnnl,INCLUDE_DIRECTORIES>)
-
-    target_include_directories(${TARGET_NAME}_obj PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/nodes/executors)
 
     set_ie_threading_interface_for(${TARGET_NAME}_obj)
 

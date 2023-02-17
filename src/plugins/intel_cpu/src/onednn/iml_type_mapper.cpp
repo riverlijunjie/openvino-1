@@ -112,6 +112,7 @@ const char* impl_type_to_string(impl_desc_type type) {
     CASE(brgemm_uni);
     CASE(brgemm_avx512_amx);
     CASE(brgemm_sparse_avx512_amx);
+    CASE(acl);
     CASE(gemm_acl);
     CASE(winograd_acl);
 

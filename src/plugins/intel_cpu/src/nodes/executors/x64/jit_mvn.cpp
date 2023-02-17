@@ -1421,7 +1421,7 @@ void JitMVNExecutor::mvn_blk(const uint8_t* src_data, uint8_t* dst_data, const v
                     arg.post_op_data = post_ops_data_;
                     (*mvn_variance_kernel)(&arg);
 
-                    size_t min_cb = (std::min)(blk_size, C - cb * blk_size);
+                    size_t min_cb = (std::min)(blk_size, jcp.C - cb * blk_size);
                     for (int i = 0; i < min_cb; i++)
                         variance_internal += variance_buffer_ptr[i];
                     return variance_internal;

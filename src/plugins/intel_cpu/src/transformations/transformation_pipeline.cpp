@@ -180,11 +180,11 @@ void Transformations::PreLpt(const std::vector<ov::element::Type>& defaultPrecis
 
     ov::pass::Manager manager;
     manager.set_per_pass_validation(false);
-    manager.register_pass<ov::pass::InitNodeInfo>();
+    CPU_REGISTER_PASS_COMMON(manager, ov::pass::InitNodeInfo);
 
     const bool useLpt = !defaultPrecisions.empty();
     if (useLpt) {
-        manager.register_pass<ov::pass::MarkDequantizationSubgraph>(defaultPrecisions);
+        CPU_REGISTER_PASS_COMMON(manager, ov::pass::MarkDequantizationSubgraph, defaultPrecisions);
     }
 
     auto get_convert_precisions = []() {
@@ -209,53 +209,51 @@ void Transformations::PreLpt(const std::vector<ov::element::Type>& defaultPrecis
     static const auto precisions = get_convert_precisions();
     type_to_fuse_map type_to_fuse = {{ov::opset10::Convert::get_type_info_static(), fuse_type_to_convert}};
 
-    manager.register_pass<ov::pass::AUGRUCellFusion>();
-    manager.register_pass<ov::pass::CommonOptimizations>();
-    manager.register_pass<ov::pass::WrapInterpolateIntoTransposes>();
-    manager.register_pass<ov::pass::TransposeSinking>();
-    manager.register_pass<ov::pass::ConvertSequenceToTensorIterator>();
-    manager.register_pass<ov::pass::ConvertOpSet3ToOpSet2>();
-    manager.register_pass<ov::pass::ConvertOpSet2ToOpSet1>();
-    manager.register_pass<ov::pass::LSTMCellDecomposition>();
-    manager.register_pass<ov::pass::GRUCellDecomposition>();
-    manager.register_pass<ov::pass::RNNCellDecomposition>();
-    manager.register_pass<ov::pass::ConvertNMS1ToNMS9>();
-    manager.register_pass<ov::pass::ConvertNMS3ToNMS9>();
-    manager.register_pass<ov::pass::ConvertNMS4ToNMS9>();
-    manager.register_pass<ov::pass::ConvertNMS5ToNMS9>();
-    manager.register_pass<ov::pass::ConvertNMS9ToNMSIEInternal>();
-    manager.register_pass<ov::pass::ConvertMulticlassNmsToMulticlassNmsIE>();
-    manager.register_pass<ov::pass::ConvertMatrixNmsToMatrixNmsIE>();
-    manager.register_pass<ov::pass::TransposeMatMul>();
-    manager.register_pass<ov::pass::ConstantFolding>();
+    CPU_REGISTER_PASS_COMMON(manager, ov::pass::AUGRUCellFusion);
+    CPU_REGISTER_PASS_COMMON(manager, ov::pass::CommonOptimizations);
+    CPU_REGISTER_PASS_COMMON(manager, ov::pass::WrapInterpolateIntoTransposes);
+    CPU_REGISTER_PASS_COMMON(manager, ov::pass::TransposeSinking);
+    CPU_REGISTER_PASS_COMMON(manager, ov::pass::ConvertSequenceToTensorIterator);
+    CPU_REGISTER_PASS_COMMON(manager, ov::pass::ConvertOpSet3ToOpSet2);
+    CPU_REGISTER_PASS_COMMON(manager, ov::pass::ConvertOpSet2ToOpSet1);
+    CPU_REGISTER_PASS_COMMON(manager, ov::pass::LSTMCellDecomposition);
+    CPU_REGISTER_PASS_COMMON(manager, ov::pass::GRUCellDecomposition);
+    CPU_REGISTER_PASS_COMMON(manager, ov::pass::RNNCellDecomposition);
+    CPU_REGISTER_PASS_COMMON(manager, ov::pass::ConvertNMS1ToNMS9);
+    CPU_REGISTER_PASS_COMMON(manager, ov::pass::ConvertNMS3ToNMS9);
+    CPU_REGISTER_PASS_COMMON(manager, ov::pass::ConvertNMS4ToNMS9);
+    CPU_REGISTER_PASS_COMMON(manager, ov::pass::ConvertNMS5ToNMS9);
+    CPU_REGISTER_PASS_COMMON(manager, ov::pass::ConvertNMS9ToNMSIEInternal);
+    CPU_REGISTER_PASS_COMMON(manager, ov::pass::ConvertMulticlassNmsToMulticlassNmsIE);
+    CPU_REGISTER_PASS_COMMON(manager, ov::pass::ConvertMatrixNmsToMatrixNmsIE);
+    CPU_REGISTER_PASS_COMMON(manager, ov::pass::TransposeMatMul);
+    CPU_REGISTER_PASS_COMMON(manager, ov::pass::ConstantFolding);
 
     if (useLpt) {
         CPU_LPT_SCOPE(LowPrecisionTransformations_Part2);
-        manager.register_pass<ngraph::pass::low_precision::ConvertSubtractConstant>(defaultPrecisions);
+        CPU_REGISTER_PASS_COMMON(manager, ngraph::pass::low_precision::ConvertSubtractConstant, defaultPrecisions);
     }
-    manager.register_pass<ov::pass::Validate>();
-    manager.register_pass<ov::pass::ConvertPrecision>(precisions, type_to_fuse);
-    manager.register_pass<ov::pass::EliminateConvert>();
-    manager.register_pass<SwapConvertTranspose>();
-    OV_CPU_REGISTER_PASS_X64(manager, ConvertToInteraction);
-    OV_CPU_REGISTER_PASS_X64(manager, ConvertInteractionInt8);
-
-    auto pass_config = manager.get_pass_config();
+    CPU_REGISTER_PASS_COMMON(manager, ov::pass::Validate);
+    CPU_REGISTER_PASS_COMMON(manager, ov::pass::ConvertPrecision, precisions, type_to_fuse);
+    CPU_REGISTER_PASS_COMMON(manager, ov::pass::EliminateConvert);
+    CPU_REGISTER_PASS_COMMON(manager, SwapConvertTranspose);
+    CPU_REGISTER_PASS_X64(manager, ConvertToInteraction);
+    CPU_REGISTER_PASS_X64(manager, ConvertInteractionInt8);
 
     // SpaceToDepth/ DepthToSpace node implementation supports only equal input/output tensors with rank <= 5
-    pass_config->set_callback<ov::pass::ConvertSpaceToDepth,
-                              ov::pass::ConvertDepthToSpace>(
-                                  [](const_node_ptr &node) -> bool {
-                                      return node->input_value(0).get_shape().size() <= 5lu &&
-                                          node->input_value(0).get_shape().size() == node->get_output_shape(0).size();
-                                  });
+    CPU_SET_CALLBACK_COMMON(manager,
+        [](const_node_ptr &node) -> bool {
+            return node->input_value(0).get_shape().size() <= 5lu &&
+                node->input_value(0).get_shape().size() == node->get_output_shape(0).size();
+        },
+        ov::pass::ConvertSpaceToDepth, ov::pass::ConvertDepthToSpace);
 
-    pass_config->set_callback<ov::pass::ConvertBatchToSpace,
-                              ov::pass::ConvertSpaceToBatch>(
-                                  [](const_node_ptr &node) -> bool {
-                                      const auto & rank = node->input(0).get_partial_shape().rank().get_length();
-                                      return rank == 4lu || rank == 5lu;
-                                  });
+    CPU_SET_CALLBACK_COMMON(manager,
+        [](const_node_ptr &node) -> bool {
+            const auto & rank = node->input(0).get_partial_shape().rank().get_length();
+            return rank == 4lu || rank == 5lu;
+        },
+        ov::pass::ConvertBatchToSpace, ov::pass::ConvertSpaceToBatch);
 
     auto isCellPrimitiveSupported = [](const_node_ptr &node) -> bool {
         if (const auto &rnn_cell = std::dynamic_pointer_cast<const ov::opset4::RNNCell>(node)) {
@@ -320,36 +318,43 @@ void Transformations::PreLpt(const std::vector<ov::element::Type>& defaultPrecis
         return false;
     };
 
-    pass_config->set_callback<ov::pass::ConvertRNNSequenceToTensorIterator,
-                              ov::pass::ConvertGRUSequenceToTensorIterator,
-                              ov::pass::ConvertLSTMSequenceToTensorIterator>(
-                                  [isSequencePrimitiveSupported](const_node_ptr &node) -> bool {
-                                      return isSequencePrimitiveSupported(node);
-                                  });
+    CPU_SET_CALLBACK_COMMON(manager,
+        [isSequencePrimitiveSupported](const_node_ptr &node) -> bool {
+            return isSequencePrimitiveSupported(node);
+        },
+        ov::pass::ConvertRNNSequenceToTensorIterator,
+        ov::pass::ConvertGRUSequenceToTensorIterator,
+        ov::pass::ConvertLSTMSequenceToTensorIterator);
 
-    pass_config->set_callback<ov::pass::RNNCellDecomposition, ov::pass::GRUCellDecomposition,
-                              ov::pass::LSTMCellDecomposition>(
-                                  [isCellPrimitiveSupported](const_node_ptr &node) -> bool {
-                                      return isCellPrimitiveSupported(node);
-                                  });
+    CPU_SET_CALLBACK_COMMON(manager,
+        [isCellPrimitiveSupported](const_node_ptr &node) -> bool {
+            return isCellPrimitiveSupported(node);
+        },
+        ov::pass::RNNCellDecomposition,
+        ov::pass::GRUCellDecomposition,
+        ov::pass::LSTMCellDecomposition);
 
-    pass_config->set_callback<ov::pass::MVN6Decomposition>(
+    CPU_SET_CALLBACK_COMMON(manager,
         [](const_node_ptr &node) -> bool {
             std::string errorMessage;
             return node::MVN::isSupportedOperation(node, errorMessage);
-        });
+        },
+        ov::pass::MVN6Decomposition);
 
-    pass_config->set_callback<ov::pass::NormalizeL2Decomposition>(
+    CPU_SET_CALLBACK_COMMON(manager,
         [](const_node_ptr &node) -> bool {
             std::string errorMsg;
             return node::NormalizeL2::isSupportedOperation(node, errorMsg);
-        });
+        },
+        ov::pass::NormalizeL2Decomposition);
 
-    pass_config->enable<ngraph::pass::SoftmaxDecomposition>();
-    pass_config->set_callback<ngraph::pass::SoftmaxDecomposition>(
+    CPU_ENABLE_PASS_COMMON(manager, ngraph::pass::SoftmaxDecomposition);
+
+    CPU_SET_CALLBACK_COMMON(manager,
             [](const_node_ptr &node) -> bool {
                 return node->input_value(0).get_partial_shape().rank().get_length() <= 5;
-            });
+            },
+        ngraph::pass::SoftmaxDecomposition);
 
     if (!isLegacyApi) {
         auto nmsCallback = [](const_node_ptr &node) -> bool {
@@ -364,62 +369,64 @@ void Transformations::PreLpt(const std::vector<ov::element::Type>& defaultPrecis
             return true;
         };
 
-        pass_config->set_callback<ov::pass::ConvertNMS9ToNMSIEInternal>(nmsCallback);
-        pass_config->set_callback<ov::pass::ConvertMulticlassNmsToMulticlassNmsIE>(nmsCallback);
-        pass_config->set_callback<ov::pass::ConvertMatrixNmsToMatrixNmsIE>(nmsCallback);
+        CPU_SET_CALLBACK_COMMON(manager, nmsCallback, ov::pass::ConvertNMS9ToNMSIEInternal);
+        CPU_SET_CALLBACK_COMMON(manager, nmsCallback, ov::pass::ConvertMulticlassNmsToMulticlassNmsIE);
+        CPU_SET_CALLBACK_COMMON(manager, nmsCallback, ov::pass::ConvertMatrixNmsToMatrixNmsIE);
     }
 
     // List of enabled/disabled transformations
 
     // Allow FP16 Converts to be folded and FP16 constants to be upgraded to FP32 data type
-    pass_config->disable<ov::pass::DisableDecompressionConvertConstantFolding>();
-    pass_config->disable<ov::pass::ConvertCompressedOnlyToLegacy>();
-    pass_config->disable<ov::pass::EyeDecomposition>();
+    CPU_DISABLE_PASS_COMMON(manager, ov::pass::DisableDecompressionConvertConstantFolding);
+    CPU_DISABLE_PASS_COMMON(manager, ov::pass::ConvertCompressedOnlyToLegacy);
+    CPU_DISABLE_PASS_COMMON(manager, ov::pass::EyeDecomposition);
+    CPU_DISABLE_PASS_COMMON(manager, ov::pass::ConvertGELU);
+    CPU_DISABLE_PASS_COMMON(manager, ov::pass::ConvertShuffleChannels3);
+    CPU_DISABLE_PASS_COMMON(manager, ov::pass::Gelu7Downgrade);
+    CPU_DISABLE_PASS_COMMON(manager, ov::pass::HSwishDecomposition);
+    CPU_DISABLE_PASS_COMMON(manager, ov::pass::ReduceL1Decomposition);
+    CPU_DISABLE_PASS_COMMON(manager, ov::pass::ReduceL2Decomposition);
+    CPU_DISABLE_PASS_COMMON(manager, ov::pass::SoftPlusDecomposition);
+    CPU_DISABLE_PASS_COMMON(manager, ov::pass::HSigmoidDecomposition);
+    CPU_DISABLE_PASS_COMMON(manager, ov::pass::ConvertMod);
+    CPU_DISABLE_PASS_COMMON(manager, ov::pass::ConvertShuffleChannels3);
+    CPU_DISABLE_PASS_COMMON(manager, ov::pass::WeightsDequantizeToFakeQuantize);
+    CPU_DISABLE_PASS_COMMON(manager, ov::pass::SimplifyCTCGreedyDecoderSeqLen);
+    CPU_DISABLE_PASS_COMMON(manager, ov::pass::ConvertGather7ToGather1);
+    CPU_DISABLE_PASS_COMMON(manager, ov::pass::ConvertGather8ToGather7);
+    CPU_DISABLE_PASS_COMMON(manager, ov::pass::ConvertMinimum);
+    CPU_DISABLE_PASS_COMMON(manager, ov::pass::ConvertBroadcastToTiles);
+    CPU_DISABLE_PASS_COMMON(manager, ov::pass::ConvertReduceMeanToPooling);
+    CPU_DISABLE_PASS_COMMON(manager, ov::pass::ConvertReduceMaxToPooling);
+    CPU_DISABLE_PASS_COMMON(manager, ov::pass::ConvertReduceSumToPooling);
+    CPU_DISABLE_PASS_COMMON(manager, ov::pass::SliceToStridedSlice);
+    CPU_DISABLE_PASS_COMMON(manager, ov::pass::ConvertDetectionOutput8ToDetectionOutput1);
+    CPU_DISABLE_PASS_COMMON(manager, ov::pass::ConvertROIAlign9To3);
+    CPU_DISABLE_PASS_COMMON(manager, ov::pass::SoftSignDecomposition);
+    CPU_DISABLE_PASS_COMMON(manager, ov::pass::UniqueDecomposition);
 
-    pass_config->disable<ov::pass::ConvertGELU>();
-    pass_config->disable<ov::pass::ConvertShuffleChannels3>();
-    pass_config->disable<ov::pass::Gelu7Downgrade>();
-    pass_config->disable<ov::pass::HSwishDecomposition>();
-    pass_config->disable<ov::pass::ReduceL1Decomposition>();
-    pass_config->disable<ov::pass::ReduceL2Decomposition>();
-    pass_config->disable<ov::pass::SoftPlusDecomposition>();
-    pass_config->disable<ov::pass::HSigmoidDecomposition>();
-    pass_config->disable<ov::pass::ConvertMod>();
-    pass_config->disable<ov::pass::ConvertShuffleChannels3>();
-    pass_config->disable<ov::pass::WeightsDequantizeToFakeQuantize>();
-    pass_config->disable<ov::pass::SimplifyCTCGreedyDecoderSeqLen>();
-    pass_config->disable<ov::pass::ConvertGather7ToGather1>();
-    pass_config->disable<ov::pass::ConvertGather8ToGather7>();
-    pass_config->disable<ov::pass::ConvertMinimum>();
-    pass_config->disable<ov::pass::ConvertBroadcastToTiles>();
-    pass_config->disable<ov::pass::ConvertReduceMeanToPooling>();
-    pass_config->disable<ov::pass::ConvertReduceMaxToPooling>();
-    pass_config->disable<ov::pass::ConvertReduceSumToPooling>();
-    pass_config->disable<ov::pass::SliceToStridedSlice>();
-    pass_config->disable<ov::pass::ConvertDetectionOutput8ToDetectionOutput1>();
-    pass_config->disable<ov::pass::ConvertROIAlign9To3>();
-    pass_config->disable<ov::pass::SoftSignDecomposition>();
-    pass_config->disable<ov::pass::UniqueDecomposition>();
-
-    pass_config->enable<ov::pass::NormalizeL2Decomposition>();
-    pass_config->enable<ov::pass::ConvertInterpolate1ToInterpolate4>();
-    pass_config->enable<ov::pass::ConvertGather1ToGather7>();
-    pass_config->enable<ov::pass::ConvertDetectionOutput1ToDetectionOutput8>();
-    pass_config->enable<ov::pass::ConvertROIAlign3To9>();
+    CPU_ENABLE_PASS_COMMON(manager, ov::pass::NormalizeL2Decomposition);
+    CPU_ENABLE_PASS_COMMON(manager, ov::pass::ConvertInterpolate1ToInterpolate4);
+    CPU_ENABLE_PASS_COMMON(manager, ov::pass::ConvertGather1ToGather7);
+    CPU_ENABLE_PASS_COMMON(manager, ov::pass::ConvertDetectionOutput1ToDetectionOutput8);
+    CPU_ENABLE_PASS_COMMON(manager, ov::pass::ConvertROIAlign3To9);
 
     if (useLpt) {
         CPU_LPT_SCOPE(LowPrecisionTransformations_Part3);
-        pass_config->set_callback<ov::pass::AddFakeQuantizeFusion,
-                                  ov::pass::MulFakeQuantizeFusion,
-                                  ov::pass::FakeQuantizeMulFusion>(
-                                      [](const_node_ptr &node) -> bool {
-                                          std::string errMsg;
-                                          return !node::FakeQuantize::isSupportedOperation(node, errMsg);
-                                      });
+        CPU_SET_CALLBACK_COMMON(manager,
+            [](const_node_ptr &node) -> bool {
+                std::string errMsg;
+                return !node::FakeQuantize::isSupportedOperation(node, errMsg);
+            },
+            ov::pass::AddFakeQuantizeFusion,
+            ov::pass::MulFakeQuantizeFusion,
+            ov::pass::FakeQuantizeMulFusion);
 
-        pass_config->set_callback<ov::pass::ConvertQuantizeDequantize>([&defaultPrecisions](const_node_ptr &node) -> bool {
-            return ngraph::pass::low_precision::NetworkHelper::areQuantizeAndDequantizeSupportedForMultiply(node, defaultPrecisions);
-        });
+        CPU_SET_CALLBACK_COMMON(manager,
+            [&defaultPrecisions](const_node_ptr &node) -> bool {
+                return ngraph::pass::low_precision::NetworkHelper::areQuantizeAndDequantizeSupportedForMultiply(node, defaultPrecisions);
+            },
+            ov::pass::ConvertQuantizeDequantize);
     }
 
     manager.run_passes(model);
@@ -480,23 +487,26 @@ void Transformations::Lpt(const bool hasINT16orINT32Levels, const std::vector<ov
     }
 
     ov::pass::Manager lptManager;
-    lptManager.register_pass<ngraph::pass::low_precision::LowPrecision>(
+    CPU_REGISTER_PASS_COMMON(lptManager, ngraph::pass::low_precision::LowPrecision,
         supportedPrecisions,
         quantizationRestrictions,
         LayerTransformation::Params(updatePrecision, ov::element::f32, defaultPrecisions));
-    lptManager.get_pass_config()->set_callback<ngraph::pass::low_precision::MarkupPrecisions>([](const_node_ptr& node) -> bool {
-        if (const auto mulitply = std::dynamic_pointer_cast<const ov::opset1::Multiply>(node)) {
-            return !MultiplyToGroupConvolutionTransformation::canBeTransformedToGroupConvolution(mulitply);
-        }
-        return false;
-    });
-    lptManager.get_pass_config()->set_callback<ngraph::pass::low_precision::ConvolutionBackpropDataTransformation>(
+    CPU_SET_CALLBACK_COMMON(lptManager,
+        [](const_node_ptr& node) -> bool {
+            if (const auto mulitply = std::dynamic_pointer_cast<const ov::opset1::Multiply>(node)) {
+                return !MultiplyToGroupConvolutionTransformation::canBeTransformedToGroupConvolution(mulitply);
+            }
+            return false;
+        },
+        ngraph::pass::low_precision::MarkupPrecisions);
+    CPU_SET_CALLBACK_COMMON(lptManager,
         [&defaultPrecisions](const_node_ptr& node) -> bool {
             return LayerTransformation::isAsymmetricQuantization(node, defaultPrecisions) ||
                 WeightableLayerTransformation::isAsymmetricOnWeights(node, defaultPrecisions);
-        });
+        },
+        ngraph::pass::low_precision::ConvolutionBackpropDataTransformation);
 
-    lptManager.get_pass_config()->disable<ngraph::pass::low_precision::MultiplyToGroupConvolutionTransformation>();
+    CPU_DISABLE_PASS_COMMON(lptManager, ngraph::pass::low_precision::MultiplyToGroupConvolutionTransformation);
 
     lptManager.run_passes(model);
 }
@@ -505,28 +515,32 @@ void Transformations::PostLpt() {
     CPU_DEBUG_CAP_TRANSFORMATION_SCOPE(this, PostLpt);
 
     ov::pass::Manager postLPTPassManager;
-    postLPTPassManager.register_pass<ov::pass::UnrollTensorIterator>();
-    postLPTPassManager.register_pass<ov::pass::ReshapePRelu>();
-    postLPTPassManager.get_pass_config()->set_callback<ov::pass::UnrollTensorIterator>([](const_node_ptr &node) -> bool {
-        // UnrollTI transformation is disabled by default, is turned on by LowLatency transformation
-        return node->get_rt_info().count("UNROLL_TI") == 0;
-    });
-    postLPTPassManager.register_pass<MoveEltwiseUpThroughDataMov>();
-    postLPTPassManager.get_pass_config()->set_callback<MoveEltwiseUpThroughDataMov>([](const std::shared_ptr<const ov::Node>& node) -> bool {
-        if (node->get_input_size() >= 2) {
-            return node->get_input_element_type(1) == ov::element::i8 || node->get_input_element_type(1) == ov::element::u8;
-        }
-        return false;
-    });
+    CPU_REGISTER_PASS_COMMON(postLPTPassManager, ov::pass::UnrollTensorIterator);
+    CPU_REGISTER_PASS_COMMON(postLPTPassManager, ov::pass::ReshapePRelu);
+    CPU_SET_CALLBACK_COMMON(postLPTPassManager,
+        [](const_node_ptr &node) -> bool {
+            // UnrollTI transformation is disabled by default, is turned on by LowLatency transformation
+            return node->get_rt_info().count("UNROLL_TI") == 0;
+        },
+        ov::pass::UnrollTensorIterator);
+    CPU_REGISTER_PASS_COMMON(postLPTPassManager, MoveEltwiseUpThroughDataMov);
+    CPU_SET_CALLBACK_COMMON(postLPTPassManager,
+        [](const std::shared_ptr<const ov::Node>& node) -> bool {
+            if (node->get_input_size() >= 2) {
+                return node->get_input_element_type(1) == ov::element::i8 || node->get_input_element_type(1) == ov::element::u8;
+            }
+            return false;
+        },
+        MoveEltwiseUpThroughDataMov);
 
-    postLPTPassManager.register_pass<ov::pass::ConstantFolding>();
+    CPU_REGISTER_PASS_COMMON(postLPTPassManager, ov::pass::ConstantFolding);
 
     // Snippets may brake MHA patterns so the fusion has to performed before
-    OV_CPU_REGISTER_PASS_X64(postLPTPassManager, MHAFusion);
-    OV_CPU_REGISTER_PASS_X64(postLPTPassManager, FuseFQtoInteraction);
+    CPU_REGISTER_PASS_X64(postLPTPassManager, MHAFusion);
+    CPU_REGISTER_PASS_X64(postLPTPassManager, FuseFQtoInteraction);
 
-    OV_CPU_SET_CALLBACK_X64(postLPTPassManager,
-         ([this](const std::shared_ptr<const ov::Node>& n) -> bool {
+    CPU_SET_CALLBACK_X64(postLPTPassManager,
+        ([this](const std::shared_ptr<const ov::Node>& n) -> bool {
             std::string errorMessage;
 
             if (!node::MHA::isSupportedOperation(n, errorMessage))
@@ -543,16 +557,16 @@ void Transformations::PostLpt() {
 
             return false;
         }),
-    MHAFloatFusion, MHAFloatFusion2, MHAQuantFusion, MHAQuantFusion2);
+        MHAFloatFusion, MHAFloatFusion2, MHAQuantFusion, MHAQuantFusion2);
 
     // Float MHA is supported by snippets now
     if (!enableBF16) {
-        OV_CPU_DISABLE_PASS_X64(postLPTPassManager, MHAFloatFusion);
-        OV_CPU_DISABLE_PASS_X64(postLPTPassManager, MHAFloatFusion2);
+        CPU_DISABLE_PASS_X64(postLPTPassManager, MHAFloatFusion);
+        CPU_DISABLE_PASS_X64(postLPTPassManager, MHAFloatFusion2);
     }
 
     // Execute before snippets. Otherwise FQ will be converted to Subgraph
-    postLPTPassManager.register_pass<ConvertFqRnnToQuantizedRnn>();
+    CPU_REGISTER_PASS_COMMON(postLPTPassManager, ConvertFqRnnToQuantizedRnn);
     postLPTPassManager.run_passes(model);
 }
 
@@ -563,88 +577,92 @@ void Transformations::MainSnippets(void) {
 
     ngraph::pass::Manager snippetsManager;
     if (snippetsMode != Config::SnippetsMode::IgnoreCallback)
-        snippetsManager.register_pass<SnippetsMarkSkipped>();
-    snippetsManager.register_pass<ngraph::snippets::pass::SnippetsTokenization>();
+        CPU_REGISTER_PASS_X64(snippetsManager, SnippetsMarkSkipped);
+    CPU_REGISTER_PASS_X64(snippetsManager, ngraph::snippets::pass::SnippetsTokenization);
 
     const bool isMHASupported =
             !enableBF16 &&  // TODO: Need to add BF16 support for MHA in Snippets
             dnnl::impl::cpu::x64::mayiuse(dnnl::impl::cpu::x64::avx512_core);  // MHA has BRGEMM that is supported only on AVX512 platforms
     if (!isMHASupported) {
-        snippetsManager.get_pass_config()->disable<ngraph::snippets::pass::TokenizeMHASnippets>();
+        CPU_DISABLE_PASS_X64(snippetsManager, ngraph::snippets::pass::TokenizeMHASnippets);
     }
     if (snippetsMode != Config::SnippetsMode::IgnoreCallback) {
-        snippetsManager.get_pass_config()->set_callback<ngraph::snippets::pass::TokenizeMHASnippets>(
-                [](const std::shared_ptr<const ov::Node>& n) -> bool {
-                    const auto pshape = n->get_output_partial_shape(0);
-                    const auto shape = pshape.get_shape();
-                    const auto parallel_work_amount =
-                            std::accumulate(shape.rbegin() + 2, shape.rend(), 1, std::multiplies<size_t>());
-                    const auto kernel_buffer_size =
-                            std::accumulate(shape.rbegin(), shape.rbegin() + 2, 1, std::multiplies<size_t>()) *
-                            n->get_output_element_type(0).size();
-                    // Heuristic values:
-                    //    parallelism work amount - not enough work amount for parallelism
-                    //    kernel work amount - large shape for kernel execution, not cache-local
-                    // TODO: The heuristics will be removed after
-                    //       - loop blocking support on code generation level
-                    //       - parallelism support on JIT level
-                    const auto needed_num_of_threads = 12lu;
-                    const auto l2_cache_size = dnnl::utils::get_cache_size(2, true);
-                    const auto is_unsupported_parallel_work_amount = parallel_get_num_threads() / 2 > parallel_work_amount &&
-                                                                     parallel_work_amount < needed_num_of_threads;
-                    const auto is_unsupported_kernel_work_amount = kernel_buffer_size > l2_cache_size;
-                    return is_unsupported_parallel_work_amount || is_unsupported_kernel_work_amount;
-                });
-        snippetsManager.get_pass_config()->set_callback<ngraph::snippets::pass::TokenizeSnippets>(
-                [](const std::shared_ptr<const ov::Node>& n) -> bool {
-                    // CPU Plugin support Swish in Subgraph via conversion to SwichCPU which assumes second input to be constant
-                    const bool is_unsupported_swish =
-                            ov::is_type<const ov::op::v4::Swish>(n) && n->inputs().size() > 1 &&
-                            !ov::is_type<const ov::op::v0::Constant>(n->get_input_node_shared_ptr(1));
-                    // todo: general tokenization flow is not currently supported for these operations.
-                    //  they can be tokenized only as a part of complex patterns
-                    const bool is_disabled_tokenization = (ov::is_type<const ov::op::v1::Softmax>(n) ||
-                                                           ov::is_type<const ov::op::v8::Softmax>(n) ||
-                                                           ov::is_type<const ov::op::v0::MatMul>(n) ||
-                                                           ov::is_type<const ov::op::v1::Transpose>(n) ||
-                                                           ov::is_type<const ov::op::v1::Broadcast>(n) ||
-                                                           ov::is_type<const ov::op::v3::Broadcast>(n));
-                    const auto& inputs = n->inputs();
-                    // todo: clarify whether we can evaluate snippets on const paths
-                    const bool has_only_const_inputs = std::all_of(inputs.begin(), inputs.end(),
-                                                                   [](const ov::Input<const ov::Node>& in) {
-                                                                       return ov::is_type<ov::op::v0::Constant>(
-                                                                               in.get_source_output().get_node_shared_ptr());
-                                                                   });
-                    // todo: clarify whether we can evaluate snippets on inputs with larger ranks
-                    auto rank_is_too_large = [](const ov::descriptor::Tensor& t) {
-                        // callback is called has_supported_in_out(), so it's safe to assume that the shapes are static
-                        return t.get_partial_shape().rank().get_length() > 6;
-                    };
-                    const bool bad_input_rank = std::any_of(inputs.begin(), inputs.end(),
-                                                            [&](const ov::Input<const ov::Node>& in) {
-                                                                return rank_is_too_large(in.get_tensor());
+        CPU_SET_CALLBACK_X64(snippetsManager,
+            [](const std::shared_ptr<const ov::Node>& n) -> bool {
+                const auto pshape = n->get_output_partial_shape(0);
+                const auto shape = pshape.get_shape();
+                const auto parallel_work_amount =
+                        std::accumulate(shape.rbegin() + 2, shape.rend(), 1, std::multiplies<size_t>());
+                const auto kernel_buffer_size =
+                        std::accumulate(shape.rbegin(), shape.rbegin() + 2, 1, std::multiplies<size_t>()) *
+                        n->get_output_element_type(0).size();
+                // Heuristic values:
+                //    parallelism work amount - not enough work amount for parallelism
+                //    kernel work amount - large shape for kernel execution, not cache-local
+                // TODO: The heuristics will be removed after
+                //       - loop blocking support on code generation level
+                //       - parallelism support on JIT level
+                const auto needed_num_of_threads = 12lu;
+                const auto l2_cache_size = dnnl::utils::get_cache_size(2, true);
+                const auto is_unsupported_parallel_work_amount = parallel_get_num_threads() / 2 > parallel_work_amount &&
+                                                                parallel_work_amount < needed_num_of_threads;
+                const auto is_unsupported_kernel_work_amount = kernel_buffer_size > l2_cache_size;
+                return is_unsupported_parallel_work_amount || is_unsupported_kernel_work_amount;
+            },
+            ngraph::snippets::pass::TokenizeMHASnippets);
+        CPU_SET_CALLBACK_X64(snippetsManager,
+            [](const std::shared_ptr<const ov::Node>& n) -> bool {
+                // CPU Plugin support Swish in Subgraph via conversion to SwichCPU which assumes second input to be constant
+                const bool is_unsupported_swish =
+                        ov::is_type<const ov::op::v4::Swish>(n) && n->inputs().size() > 1 &&
+                        !ov::is_type<const ov::op::v0::Constant>(n->get_input_node_shared_ptr(1));
+                // todo: general tokenization flow is not currently supported for these operations.
+                //  they can be tokenized only as a part of complex patterns
+                const bool is_disabled_tokenization = (ov::is_type<const ov::op::v1::Softmax>(n) ||
+                                                    ov::is_type<const ov::op::v8::Softmax>(n) ||
+                                                    ov::is_type<const ov::op::v0::MatMul>(n) ||
+                                                    ov::is_type<const ov::op::v1::Transpose>(n) ||
+                                                    ov::is_type<const ov::op::v1::Broadcast>(n) ||
+                                                    ov::is_type<const ov::op::v3::Broadcast>(n));
+                const auto& inputs = n->inputs();
+                // todo: clarify whether we can evaluate snippets on const paths
+                const bool has_only_const_inputs = std::all_of(inputs.begin(), inputs.end(),
+                                                            [](const ov::Input<const ov::Node>& in) {
+                                                                return ov::is_type<ov::op::v0::Constant>(
+                                                                        in.get_source_output().get_node_shared_ptr());
                                                             });
-                    const auto& outputs = n->outputs();
-                    const bool bad_output_rank = std::any_of(outputs.begin(), outputs.end(),
-                                                             [&](const ov::Output<const ov::Node>& out) {
-                                                                 return rank_is_too_large(out.get_tensor());
-                                                             });
-                    return has_only_const_inputs || bad_input_rank || bad_output_rank || is_unsupported_swish ||
-                           is_disabled_tokenization;
-                });
+                // todo: clarify whether we can evaluate snippets on inputs with larger ranks
+                auto rank_is_too_large = [](const ov::descriptor::Tensor& t) {
+                    // callback is called has_supported_in_out(), so it's safe to assume that the shapes are static
+                    return t.get_partial_shape().rank().get_length() > 6;
+                };
+                const bool bad_input_rank = std::any_of(inputs.begin(), inputs.end(),
+                                                        [&](const ov::Input<const ov::Node>& in) {
+                                                            return rank_is_too_large(in.get_tensor());
+                                                        });
+                const auto& outputs = n->outputs();
+                const bool bad_output_rank = std::any_of(outputs.begin(), outputs.end(),
+                                                        [&](const ov::Output<const ov::Node>& out) {
+                                                            return rank_is_too_large(out.get_tensor());
+                                                        });
+                return has_only_const_inputs || bad_input_rank || bad_output_rank || is_unsupported_swish ||
+                    is_disabled_tokenization;
+            },
+            ngraph::snippets::pass::TokenizeSnippets);
     }
     snippetsManager.run_passes(model);
 }
 
 void Transformations::PostSnippets(void) {
     ov::pass::Manager postSnippetsManager;
-    postSnippetsManager.register_pass<ov::pass::FakeQuantizeDecomposition>();
-    postSnippetsManager.get_pass_config()->set_callback<ov::pass::FakeQuantizeDecomposition>([](const_node_ptr& node) -> bool {
-        std::string errMsg;
-        return node::FakeQuantize::isSupportedOperation(node, errMsg);
-    });
-    postSnippetsManager.register_pass<ov::pass::ConstantFolding>();
+    CPU_REGISTER_PASS_COMMON(postSnippetsManager, ov::pass::FakeQuantizeDecomposition);
+    CPU_SET_CALLBACK_COMMON(postSnippetsManager,
+        [](const_node_ptr& node) -> bool {
+            std::string errMsg;
+            return node::FakeQuantize::isSupportedOperation(node, errMsg);
+        },
+        ov::pass::FakeQuantizeDecomposition);
+    CPU_REGISTER_PASS_COMMON(postSnippetsManager, ov::pass::ConstantFolding);
     postSnippetsManager.run_passes(model);
 }
 

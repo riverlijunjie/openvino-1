@@ -206,6 +206,12 @@ void MVN::initSupportedPrimitiveDescriptors() {
         }
     }
 
+#if defined(OPENVINO_ARCH_ARM) || defined(OPENVINO_ARCH_ARM64)
+    if (getInputShapeAtPort(0).getRank() == 4 || getInputShapeAtPort(0).getRank() == 5) {
+        pushDesc(LayoutType::nspc);
+    }
+#endif
+
     // planar
     if (canBeInplace)
         config.inConfs[0].inPlace(0);

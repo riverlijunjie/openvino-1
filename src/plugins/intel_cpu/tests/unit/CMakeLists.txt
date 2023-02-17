@@ -14,7 +14,10 @@ endif()
 
 if (NOT OPENVINO_ARCH_X86_64)
     set(EXCLUDED_SOURCE_PATHS_FOR_NON_X64 ${CMAKE_CURRENT_SOURCE_DIR}/jit_kernel_test.cpp
-                                          ${CMAKE_CURRENT_SOURCE_DIR}/registers_pool.cpp)
+                                          ${CMAKE_CURRENT_SOURCE_DIR}/registers_pool.cpp
+                                          ${CMAKE_CURRENT_SOURCE_DIR}/ngraph_transformations/convert_to_interaction.cpp
+                                          ${CMAKE_CURRENT_SOURCE_DIR}/ngraph_transformations/snipptes_mark_skipped.cpp
+                                          ${CMAKE_CURRENT_SOURCE_DIR}/snippets/fake_quantize_tokenization_test.cpp)
 endif()
 
 addIeTargetTest(

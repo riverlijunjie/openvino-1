@@ -4,7 +4,7 @@
 
 #pragma once
 
-#include "../eltwise.hpp"
+#include "nodes/executors/eltwise.hpp"
 
 namespace ov {
 namespace intel_cpu {

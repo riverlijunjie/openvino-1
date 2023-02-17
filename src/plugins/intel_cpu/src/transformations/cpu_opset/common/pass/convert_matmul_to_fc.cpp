@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-#include "../op/fully_connected.hpp"
+#include "transformations/cpu_opset/common/op/fully_connected.hpp"
 #include "convert_matmul_to_fc.hpp"
 #include <ngraph/opsets/opset1.hpp>
 #include <ngraph/rt_info.hpp>

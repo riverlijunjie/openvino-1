@@ -4,7 +4,7 @@
 
 #pragma once
 
-#include "mvn.hpp"
+#include "nodes/executors/mvn.hpp"
 
 namespace ov {
 namespace intel_cpu {

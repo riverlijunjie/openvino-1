@@ -17,6 +17,9 @@ struct EltwiseAttrs {
     float beta;
     float gamma;
 
+    EltwiseAttrs() : algorithm(Algorithm::Default), alpha(0), beta(0), gamma(0) {}
+    EltwiseAttrs(Algorithm algorithm, float alpha, float beta, float gamma) : algorithm(algorithm), alpha(alpha), beta(beta), gamma(gamma) {}
+
     bool operator==(const EltwiseAttrs& rhs) const {
         bool retVal = true;
         retVal = algorithm == rhs.algorithm &&
@@ -93,7 +96,9 @@ using EltwiseExecutorCPtr = std::shared_ptr<const EltwiseExecutor>;
 class EltwiseExecutorBuilder {
 public:
     ~EltwiseExecutorBuilder() = default;
-    virtual bool isSupported(const EltwiseAttrs& eltwiseAttrs, const std::vector<MemoryDescPtr>& srcDescs, const std::vector<MemoryDescPtr>& dstDescs) const = 0;
+    virtual bool isSupported(const EltwiseAttrs& eltwiseAttrs,
+                             const std::vector<MemoryDescPtr>& srcDescs,
+                             const std::vector<MemoryDescPtr>& dstDescs) const = 0;
     virtual EltwiseExecutorPtr makeExecutor(const ExecutorContext::CPtr context) const = 0;
 };
 
