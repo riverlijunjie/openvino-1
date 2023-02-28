@@ -278,7 +278,9 @@ ov::Plugin ov::CoreImpl::get_plugin(const std::string& pluginName) const {
                 // the same extension can be registered multiple times - ignore it!
             }
         } else {
-            TryToRegisterLibraryAsExtensionUnsafe(desc.libraryLocation);
+            // FIXME: Revert registration back
+            // TryToRegisterLibraryAsExtensionUnsafe(desc.libraryLocation);
+            std::cout << "TryToRegisterLibraryAsExtensionUnsafe is disabled temporarily." << std::endl;
         }
 
         return plugins.emplace(deviceName, plugin).first->second;
@@ -587,7 +589,8 @@ void ov::CoreImpl::apply_auto_batching(const std::shared_ptr<const ov::Model>& m
     } else {
         // check if Auto-Batch plugin registered
         try {
-            get_plugin("BATCH");
+            std::cout << "get_plugin(BATCH) is disabled tempprarily." << std::endl;
+            // get_plugin("BATCH");
         } catch (const std::runtime_error&) {
             return;
         }

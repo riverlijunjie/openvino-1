@@ -221,7 +221,11 @@ private:
             }
             search_from_dir(env_path.substr(start, sep_pos));
         } else {
+#ifndef __EMSCRIPTEN__
             search_from_dir(get_frontend_library_path());
+#else
+            search_from_dir("ss");
+#endif
         }
     }
 };

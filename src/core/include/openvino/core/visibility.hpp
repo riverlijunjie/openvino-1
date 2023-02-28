@@ -46,8 +46,8 @@
 #endif
 
 #if defined(EMSCRIPTEN)
-#    ifndef __EMSCRIPTEN___
-#        define __EMSCRIPTEN___
+#    ifndef __EMSCRIPTEN__
+#        define __EMSCRIPTEN__
 #    endif
 #endif
 

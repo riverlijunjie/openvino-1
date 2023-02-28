@@ -41,7 +41,8 @@ Plugin::Plugin() {
     _backend = ngraph::runtime::Backend::create();
 
     // create default stream executor with a given name
-    _waitExecutor = executorManager()->getIdleCPUStreamsExecutor({"TemplateWaitExecutor"});
+    // _waitExecutor = executorManager()->getIdleCPUStreamsExecutor({"TemplateWaitExecutor"});
+    std::cout << "template_plugin: executorManager()->getIdleCPUStreamsExecutor() is disabled tempprarily." << std::endl;
 }
 // ! [plugin:ctor]
 
