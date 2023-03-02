@@ -52,9 +52,14 @@ static std::string _get_frontend_library_path() {
     return ov::util::get_directory(std::string(ie_library_path));
 #    endif
 #elif defined(__APPLE__) || defined(__linux__) || defined(__EMSCRIPTEN__)
+#    ifndef __EMSCRIPTEN__
     Dl_info info;
     dladdr(reinterpret_cast<void*>(ov::frontend::get_frontend_library_path), &info);
     return ov::util::get_directory(ov::util::get_absolute_file_path(std::string(info.dli_fname))).c_str();
+#    else
+    std::cout << "dladdr(ov::frontend::get_frontend_library_path) is disabled temporarily" << std::endl;
+    return std::string("./");
+#    endif
 #else
 #    error "Unsupported OS"
 #endif  // _WIN32

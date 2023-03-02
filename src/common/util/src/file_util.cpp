@@ -10,6 +10,7 @@
 #include <cstring>
 #include <fstream>
 #include <sstream>
+#include <iostream>
 
 #include "openvino/util/common_util.hpp"
 
@@ -416,9 +417,14 @@ static std::string get_ov_library_path_a() {
     GetModuleFileNameA(hm, (LPSTR)ov_library_path, sizeof(ov_library_path));
     return get_path_name(std::string(ov_library_path));
 #elif defined(__APPLE__) || defined(__linux__) || defined(__EMSCRIPTEN__)
+#ifndef __EMSCRIPTEN__
     Dl_info info;
     dladdr(reinterpret_cast<void*>(ov::util::get_ov_lib_path), &info);
     return get_path_name(ov::util::get_absolute_file_path(info.dli_fname)).c_str();
+#else
+    std::cout << "dladdr(ov::util::get_ov_lib_path) is disabled temporarily" << std::endl;
+    return std::string("./");
+#endif
 #else
 #    error "Unsupported OS"
 #endif  // _WIN32

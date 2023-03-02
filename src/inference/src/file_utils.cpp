@@ -8,6 +8,7 @@
 #include <cstring>
 #include <fstream>
 #include <string>
+#include <iostream>
 
 #ifdef __MACH__
 #    include <mach/clock.h>
@@ -91,10 +92,15 @@ static std::string getIELibraryPathA() {
 #        endif  // __APPLE__
     return FileUtils::makePath(path, std::string("lib"));
 #    else
+#        ifndef __EMSCRIPTEN__
     Dl_info info;
     dladdr(reinterpret_cast<void*>(getIELibraryPath), &info);
     std::string path = FileUtils::absoluteFilePath(info.dli_fname);
     return getPathName(path);
+#        else
+    std::cout << "dladdr(getIELibraryPath) is disabled temporarily" << std::endl;
+    return std::string("./");
+#        endif
 #    endif  // USE_STATIC_IE
 #else
 #    error "Unsupported OS"

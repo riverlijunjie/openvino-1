@@ -23,6 +23,13 @@ if(ENABLE_INTEL_GPU)
     add_subdirectory(ocl)
 endif()
 
+if(EMSCRIPTEN)
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -s FORCE_FILESYSTEM -s MODULARIZE -s EXPORTED_RUNTIME_METHODS=\"['ccall', 'FS']\" --bind")
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -s ERROR_ON_MISSING_LIBRARIES=1 -s ERROR_ON_UNDEFINED_SYMBOLS=1")
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -s ALLOW_MEMORY_GROWTH=1")
+        message("Enable EMSCRIPTEN in thirdparty build...")
+endif()
+
 add_subdirectory(xbyak EXCLUDE_FROM_ALL)
 openvino_developer_export_targets(COMPONENT openvino_common TARGETS xbyak)
 ov_install_static_lib(xbyak ${OV_CPACK_COMP_CORE})
