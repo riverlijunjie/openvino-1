@@ -2,31 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+#include "acl_utils.hpp"
 #include "acl_matmul.hpp"
 
 namespace ov {
 namespace intel_cpu {
 
 using namespace arm_compute;
-
-TensorShape shapeCast(const VectorDims& dims) {
-    arm_compute::TensorShape tensorShape;
-    for (std::size_t i = 0; i < dims.size(); ++i) {
-        tensorShape.set(dims.size() - i - 1, dims[i], false);
-    }
-    if (tensorShape.num_dimensions() == 0) {
-        tensorShape.set(0, 1, false);
-        tensorShape.set_num_dimensions(1);
-    }
-    return tensorShape;
-}
-
-inline Dim vectorProduct(const VectorDims& vec, size_t size) {
-    Dim prod = 1;
-    for (size_t i = 0; i < size; ++i)
-        prod *= vec[i];
-    return prod;
-}
 
 AclMatMulExecutor::AclMatMulExecutor(const ExecutorContext::CPtr context) : MatMulExecutor(context) {}
 

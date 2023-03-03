@@ -295,15 +295,19 @@ std::vector<std::vector<ov::test::InputShape>> inputShapes_Int32 = {
 };
 
 std::vector<CPUSpecificParams> cpuParams_4D = {
+#if defined(OPENVINO_ARCH_X86) || defined(OPENVINO_ARCH_X86_64)
         CPUSpecificParams({nChw16c}, {nChw16c}, {}, {}),
-        CPUSpecificParams({nchw}, {nchw}, {}, {}),
         CPUSpecificParams({nhwc}, {nhwc}, {}, {})
+#endif
+        CPUSpecificParams({nchw}, {nchw}, {}, {}),
 };
 
 std::vector<CPUSpecificParams> cpuParams_5D = {
+#if defined(OPENVINO_ARCH_X86) || defined(OPENVINO_ARCH_X86_64)
         CPUSpecificParams({nCdhw16c}, {nCdhw16c}, {}, {}),
-        CPUSpecificParams({ncdhw}, {ncdhw}, {}, {}),
         CPUSpecificParams({ndhwc}, {ndhwc}, {}, {})
+#endif
+        CPUSpecificParams({ncdhw}, {ncdhw}, {}, {}),
 };
 
 std::vector<CPUSpecificParams> cpuParams_HybridLayout_4D = {
@@ -379,6 +383,7 @@ const auto params_MultiAxis_5D = testing::Combine(
         testing::ValuesIn(filterCPUSpecificParams(cpuParams_5D)),
         testing::Values(emptyFusingSpec));
 
+#if defined(OPENVINO_ARCH_X86) || defined(OPENVINO_ARCH_X86_64)
 const auto params_MultiAxis_4D_Hybrid = testing::Combine(
         testing::Combine(
             testing::ValuesIn(axesND),
@@ -404,6 +409,7 @@ const auto params_MultiAxis_5D_Hybrid = testing::Combine(
             testing::ValuesIn(inputShapes_5D)),
         testing::ValuesIn(filterCPUSpecificParams(cpuParams_HybridLayout_5D)),
         testing::Values(emptyFusingSpec));
+#endif
 
 const auto params_MultiAxis_6D = testing::Combine(
         testing::Combine(
@@ -452,6 +458,7 @@ INSTANTIATE_TEST_SUITE_P(
         ReduceCPULayerTest::getTestCaseName
 );
 
+#if defined(OPENVINO_ARCH_X86) || defined(OPENVINO_ARCH_X86_64)
 INSTANTIATE_TEST_SUITE_P(
         smoke_Reduce_MultiAxis_4D_Hybrid_CPU,
         ReduceCPULayerTest,
@@ -465,6 +472,7 @@ INSTANTIATE_TEST_SUITE_P(
         params_MultiAxis_5D_Hybrid,
         ReduceCPULayerTest::getTestCaseName
 );
+#endif
 
 INSTANTIATE_TEST_SUITE_P(
         smoke_Reduce_MultiAxis_6D_CPU,
@@ -520,6 +528,7 @@ const auto params_MultiAxis_5D_Logical = testing::Combine(
         testing::ValuesIn(filterCPUSpecificParams(cpuParams_5D)),
         testing::Values(emptyFusingSpec));
 
+#if defined(OPENVINO_ARCH_X86) || defined(OPENVINO_ARCH_X86_64)
 const auto params_MultiAxis_4D_Hybrid_Logical = testing::Combine(
         testing::Combine(
             testing::ValuesIn(axesND),
@@ -545,6 +554,7 @@ const auto params_MultiAxis_5D_Hybrid_Logical = testing::Combine(
             testing::ValuesIn(inputShapes_5D)),
         testing::ValuesIn(filterCPUSpecificParams(cpuParams_HybridLayout_5D)),
         testing::Values(emptyFusingSpec));
+#endif
 
 const auto params_MultiAxis_6D_Logical = testing::Combine(
         testing::Combine(
@@ -580,6 +590,7 @@ INSTANTIATE_TEST_SUITE_P(
         ReduceCPULayerTest::getTestCaseName
 );
 
+#if defined(OPENVINO_ARCH_X86) || defined(OPENVINO_ARCH_X86_64)
 INSTANTIATE_TEST_SUITE_P(
         smoke_Reduce_MultiAxis_4D_Hybrid_Logical_CPU,
         ReduceCPULayerTest,
@@ -593,6 +604,7 @@ INSTANTIATE_TEST_SUITE_P(
         params_MultiAxis_5D_Hybrid_Logical,
         ReduceCPULayerTest::getTestCaseName
 );
+#endif
 
 INSTANTIATE_TEST_SUITE_P(
         smoke_Reduce_MultiAxis_6D_Logical_CPU,
@@ -602,6 +614,7 @@ INSTANTIATE_TEST_SUITE_P(
 );
 
 /* ================================ 2.1 Fusion - KeepDims ================================ */
+#if defined(OPENVINO_ARCH_X86) || defined(OPENVINO_ARCH_X86_64)
 const auto params_OneAxis_fusing = testing::Combine(
         testing::Combine(
             testing::ValuesIn(axes),
@@ -722,6 +735,8 @@ INSTANTIATE_TEST_SUITE_P(
         params_MultiAxis_5D_Hybrid_fusing_KeepNoDims,
         ReduceCPULayerTest::getTestCaseName
 );
+#endif
+
 } // namespace
 } // namespace CPULayerTestsDefinitions
 

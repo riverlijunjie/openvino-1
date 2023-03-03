@@ -10,6 +10,8 @@
 #include <memory>
 #include <vector>
 
+#include "executors/reduce_list.hpp"
+
 namespace ov {
 namespace intel_cpu {
 namespace node {
@@ -166,6 +168,10 @@ private:
     static const std::map<const ngraph::DiscreteTypeInfo, std::function<void(const std::shared_ptr<ngraph::Node>& op, Reduce& node)>> initializers;
 
     std::string errorPrefix;
+
+    ReduceAttrs reduceAttrs;
+
+    std::shared_ptr<ReduceExecutor> execPtr = nullptr;
 };
 
 }   // namespace node

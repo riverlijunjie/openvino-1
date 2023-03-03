@@ -107,6 +107,7 @@ static inline bool isFloatCompatible(memory::data_type type) {
     return memory::data_type::f32 == type || memory::data_type::bf16 == type;
 }
 
+#if defined(OPENVINO_ARCH_X86_64)
 template <cpu_isa_t isa>
 struct jit_uni_reduce_kernel_f32 : public jit_uni_reduce_kernel, public jit_generator {
     DECLARE_CPU_JIT_AUX_FUNCTIONS(jit_uni_reduce_kernel_f32)
@@ -1672,6 +1673,7 @@ private:
         }
     }
 };
+#endif
 
 const std::map<const ngraph::DiscreteTypeInfo, std::function<void(const std::shared_ptr<ngraph::Node>&, Reduce&)>> Reduce::initializers = {
     {ngraph::opset4::ReduceL1::get_type_info_static(), [](const std::shared_ptr<ngraph::Node>& op, Reduce& node) {
@@ -1759,6 +1761,9 @@ Reduce::Reduce(const std::shared_ptr<ngraph::Node>& op, const GraphContext::CPtr
         }
         vec_reduceDH_prc.clear();
         setJITBeyond5D();
+        reduceAttrs.operation = algorithm;
+        reduceAttrs.axes = raw_axes;
+        reduceAttrs.keepDims = keep_dims;
     } else {
         IE_THROW(NotImplemented) << errorMessage;
     }
@@ -1840,7 +1845,22 @@ void Reduce::initSupportedPrimitiveDescriptors() {
         config.inConfs[REDUCE_INDEXES].setMemDesc(creatorsMap.at(LayoutType::ncsp)->createSharedDesc(InferenceEngine::Precision::I32,
                                                                                                  getInputShapeAtPort(REDUCE_INDEXES)));
         config.outConfs[0].setMemDesc(creatorsMap.at(outFormat)->createSharedDesc(outPrecision, getOutputShapeAtPort(0)));
+    #if defined(OPENVINO_ARCH_X86_64)
         supportedPrimitiveDescriptors.push_back({config, impl_type});
+    #else
+        std::vector<MemoryDescPtr> srcMemoryDescs;
+        for (int i = 0; i < config.inConfs.size(); i++) {
+            srcMemoryDescs.push_back(config.inConfs[i].getMemDesc());
+        }
+        std::vector<MemoryDescPtr> dstMemoryDescs;
+        for (int i = 0; i < config.outConfs.size(); i++) {
+            dstMemoryDescs.push_back(config.outConfs[i].getMemDesc());
+        }
+
+        auto factory = std::make_shared<ReduceExecutorFactory>(reduceAttrs, srcMemoryDescs, dstMemoryDescs,
+                                                               std::make_shared<ExecutorContext>(context, getPrimitivesPriority()));
+        supportedPrimitiveDescriptors.push_back({config, impl_type, factory});
+    #endif
     };
 
     if (jit_mode) {
@@ -1873,7 +1893,7 @@ void Reduce::initSupportedPrimitiveDescriptors() {
             }
         }
     } else {
-        pushDesc(LayoutType::ncsp, LayoutType::ncsp, InferenceEngine::Precision::FP32, InferenceEngine::Precision::FP32, impl_desc_type::ref);
+        pushDesc(LayoutType::ncsp, LayoutType::ncsp, InferenceEngine::Precision::FP32, InferenceEngine::Precision::FP32, impl_desc_type::undef);
     }
 }
 
@@ -1882,6 +1902,9 @@ bool Reduce::isExecutable() const {
 }
 
 void Reduce::prepareParams() {
+    auto &dstMemPtr = getChildEdgeAt(0)->getMemoryPtr();
+    const SizeVector &dst_dims = dstMemPtr->getDesc().getShape().getDims();
+#if defined(OPENVINO_ARCH_X86_64)
     src_dims = getParentEdgesAtPort(REDUCE_DATA)[0]->getMemory().getDesc().getShape().getDims();
     std::vector<int> reduce_axes;
     if (jit_mode && jit_beyond_5D) {
@@ -1890,8 +1913,6 @@ void Reduce::prepareParams() {
         reduce_axes = raw_axes;
     }
 
-    auto &dstMemPtr = getChildEdgeAt(0)->getMemoryPtr();
-    const SizeVector &dst_dims = dstMemPtr->getDesc().getShape().getDims();
     dst_size = dstMemPtr->GetSize();
     calc_process_dst_dims(reduce_axes, dst_dims);
     if (jit_mode) {
@@ -1931,6 +1952,21 @@ void Reduce::prepareParams() {
             compile_post_kernel = false;
         }
     }
+#endif
+    std::vector<MemoryDescPtr> srcMemoryDescs;
+    for (int i = 0; i < getOriginalInputsNumber(); i++) {
+        srcMemoryDescs.push_back(getParentEdgeAt(i)->getMemoryPtr()->getDescPtr());
+    }
+    std::vector<MemoryDescPtr> dstMemoryDescs;
+    for (int i = 0; i < getOriginalOutputsNumber(); i++) {
+        dstMemoryDescs.push_back(getChildEdgeAt(i)->getMemoryPtr()->getDescPtr());
+    }
+    dnnl::primitive_attr attr;
+    setPostOps(attr, dst_dims, true);
+    auto selectedPD = getSelectedPrimitiveDescriptor();
+
+    execPtr = selectedPD->getExecutorFactoryAs<ReduceExecutorFactory>()->makeExecutor(reduceAttrs, srcMemoryDescs, dstMemoryDescs, attr);
+    selectedPD->setImplementationType(execPtr->getImplType());
 }
 
 void Reduce::createPrimitive() {
@@ -1982,7 +2018,7 @@ void Reduce::createPrimitive() {
             prepareParams();
         updateLastInputDims();
     }
-
+#if defined(OPENVINO_ARCH_X86_64)
     if (mayiuse(cpu::x64::avx512_core)) {
         reduce_kernel.reset(new jit_uni_reduce_kernel_f32<cpu::x64::avx512_core>(jcp));
     } else if (mayiuse(cpu::x64::avx2)) {
@@ -1990,6 +2026,7 @@ void Reduce::createPrimitive() {
     } else if (mayiuse(cpu::x64::sse41)) {
         reduce_kernel.reset(new jit_uni_reduce_kernel_f32<cpu::x64::sse41>(jcp));
     }
+#endif
     if (reduce_kernel)
         reduce_kernel->create_ker();
     jit_mode = jit_mode && reduce_kernel;
@@ -2000,6 +2037,7 @@ void Reduce::executeDynamicImpl(dnnl::stream strm) {
 }
 
 void Reduce::execute(dnnl::stream strm) {
+#if defined(OPENVINO_ARCH_X86_64)
     auto &dstMemPtr = getChildEdgeAt(0)->getMemoryPtr();
     auto &srcMemPtr = getParentEdgeAt(REDUCE_DATA)->getMemoryPtr();
 
@@ -2020,6 +2058,22 @@ void Reduce::execute(dnnl::stream strm) {
             IE_THROW() << errorPrefix << " supports only plain layout on machine w/o sse42.";
         }
     }
+#else
+    if (!execPtr) {
+        IE_THROW() << "Can't execute Reduce node. Executor is not created";
+    }
+
+    std::vector<MemoryCPtr> srcMemory;
+    for (int i = 0; i < getOriginalInputsNumber(); i++) {
+        srcMemory.push_back(getParentEdgeAt(i)->getMemoryPtr());
+    }
+    std::vector<MemoryPtr> dstMemory;
+    for (int i = 0; i < getOriginalOutputsNumber(); i++) {
+        dstMemory.push_back(getChildEdgeAt(i)->getMemoryPtr());
+    }
+
+    execPtr->exec(srcMemory, dstMemory, postOpsArgs);
+#endif
 }
 
 void Reduce::reduce_type(const uint8_t *in_ptr, uint8_t *out_ptr, size_t dst_size) {

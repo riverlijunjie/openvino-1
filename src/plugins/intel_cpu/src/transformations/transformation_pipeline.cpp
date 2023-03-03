@@ -91,6 +91,7 @@
 #include "transformations/snippets/x64/pass/snippets_mark_skipped.hpp"
 #include "transformations/cpu_opset/x64/pass/mha_fusion.hpp"
 #include "transformations/cpu_opset/x64/pass/convert_to_interaction.hpp"
+#include "transformations/cpu_opset/arm/pass/convert_reduce_multi_axis.hpp"
 #include "transformations/cpu_opset/common/pass/convert_fq_rnn_to_quantized_rnn.hpp"
 #include "transformations/cpu_opset/common/pass/move_eltwise_up_data_movement.hpp"
 #include "transformations/cpu_opset/common/pass/swap_convert_transpose.hpp"
@@ -239,6 +240,7 @@ void Transformations::PreLpt(const std::vector<ov::element::Type>& defaultPrecis
     CPU_REGISTER_PASS_COMMON(manager, SwapConvertTranspose);
     CPU_REGISTER_PASS_X64(manager, ConvertToInteraction);
     CPU_REGISTER_PASS_X64(manager, ConvertInteractionInt8);
+    CPU_REGISTER_PASS_ARM(manager, ConvertReduceMultiAxis);
 
     // SpaceToDepth/ DepthToSpace node implementation supports only equal input/output tensors with rank <= 5
     CPU_SET_CALLBACK_COMMON(manager,
@@ -384,8 +386,6 @@ void Transformations::PreLpt(const std::vector<ov::element::Type>& defaultPrecis
     CPU_DISABLE_PASS_COMMON(manager, ov::pass::ConvertShuffleChannels3);
     CPU_DISABLE_PASS_COMMON(manager, ov::pass::Gelu7Downgrade);
     CPU_DISABLE_PASS_COMMON(manager, ov::pass::HSwishDecomposition);
-    CPU_DISABLE_PASS_COMMON(manager, ov::pass::ReduceL1Decomposition);
-    CPU_DISABLE_PASS_COMMON(manager, ov::pass::ReduceL2Decomposition);
     CPU_DISABLE_PASS_COMMON(manager, ov::pass::SoftPlusDecomposition);
     CPU_DISABLE_PASS_COMMON(manager, ov::pass::HSigmoidDecomposition);
     CPU_DISABLE_PASS_COMMON(manager, ov::pass::ConvertMod);
@@ -404,6 +404,9 @@ void Transformations::PreLpt(const std::vector<ov::element::Type>& defaultPrecis
     CPU_DISABLE_PASS_COMMON(manager, ov::pass::ConvertROIAlign9To3);
     CPU_DISABLE_PASS_COMMON(manager, ov::pass::SoftSignDecomposition);
     CPU_DISABLE_PASS_COMMON(manager, ov::pass::UniqueDecomposition);
+
+    CPU_DISABLE_PASS_X64(manager, ov::pass::ReduceL1Decomposition);
+    CPU_DISABLE_PASS_X64(manager, ov::pass::ReduceL2Decomposition);
 
     CPU_ENABLE_PASS_COMMON(manager, ov::pass::NormalizeL2Decomposition);
     CPU_ENABLE_PASS_COMMON(manager, ov::pass::ConvertInterpolate1ToInterpolate4);
