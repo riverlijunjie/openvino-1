@@ -295,11 +295,9 @@ public:
         std::vector<std::string> configKeys = {"SUPPORTED_CONFIG_KEYS", "NUM_STREAMS"};
         ON_CALL(*core, GetMetric(_, StrEq(METRIC_KEY(SUPPORTED_CONFIG_KEYS)), _)).WillByDefault(Return(configKeys));
 
-        std::set<std::string> coreConfigs = {ov::cache_dir.name(),
-                                             ov::hint::allow_auto_batching.name(),
-                                             ov::auto_batch_timeout.name()};
-        ON_CALL(*core, GetMetric(_, StrEq("CORE_PROPERTY_KEYS"), _)).WillByDefault(Return(coreConfigs));
-        ON_CALL(*core, GetConfig(_, StrEq(GPU_CONFIG_KEY(MAX_NUM_THREADS)))).WillByDefault(Return(12));
+        ON_CALL(*core, GetConfig(_, StrEq(ov::cache_dir.name()))).WillByDefault(Return(""));
+        ON_CALL(*core, GetConfig(_, StrEq(ov::auto_batch_timeout.name()))).WillByDefault(Return("1000"));
+        ON_CALL(*core, GetConfig(_, StrEq(ov::hint::allow_auto_batching.name()))).WillByDefault(Return("YES"));
         ON_CALL(*core, GetConfig(_, StrEq(ov::compilation_num_threads.name()))).WillByDefault(Return(12));
 
         ON_CALL(*plugin, ParseMetaDevices)

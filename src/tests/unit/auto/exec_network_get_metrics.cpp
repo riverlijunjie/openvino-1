@@ -115,9 +115,11 @@ public:
        IE_SET_METRIC(SUPPORTED_CONFIG_KEYS, supportConfigs, {});
        ON_CALL(*core, GetMetric(_, StrEq(METRIC_KEY(SUPPORTED_CONFIG_KEYS)), _))
            .WillByDefault(RETURN_MOCK_VALUE(supportConfigs));
-       std::set<std::string> coreConfigs = {"CACHE_DIR", "AUTO_BATCH_TIMEOUT", "ALLOW_AUTO_BATCHING"};
-       ON_CALL(*core, GetMetric(_, StrEq("CORE_PROPERTY_KEYS"), _)).WillByDefault(Return(coreConfigs));
+       ON_CALL(*core, GetConfig(_, StrEq(ov::cache_dir.name()))).WillByDefault(Return(""));
+       ON_CALL(*core, GetConfig(_, StrEq(ov::auto_batch_timeout.name()))).WillByDefault(Return("1200"));
+       ON_CALL(*core, GetConfig(_, StrEq(ov::hint::allow_auto_batching.name()))).WillByDefault(Return("YES"));
        EXPECT_CALL(*core, GetMetric(_, _, _)).Times(AnyNumber());
+       EXPECT_CALL(*core, GetConfig(_, _)).Times(AnyNumber());
        // test auto plugin
        plugin->SetName("AUTO");
     }

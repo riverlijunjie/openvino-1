@@ -344,7 +344,7 @@ IExecutableNetworkInternal::Ptr MultiDeviceInferencePlugin::LoadExeNetworkImpl(c
 
 IExecutableNetworkInternal::Ptr MultiDeviceInferencePlugin::LoadNetworkImpl(const std::string& modelPath,
                                                                               CNNNetwork network,
-                                                                              const std::map<std::string, std::string>& config,
+                                                                              const std::map<std::string, std::string>& inputConfig,
                                                                               const std::string &networkPrecision) {
     if (GetCore() == nullptr) {
         IE_THROW() << "Please, work with " << GetName() << " device via InferenceEngine::Core object";
@@ -359,7 +359,7 @@ IExecutableNetworkInternal::Ptr MultiDeviceInferencePlugin::LoadNetworkImpl(cons
     auto loadConfig = _pluginConfig;
     // if no perf hint from user with compiled model, or already been set with plugin
     // apply latency for AUTO, tput for MULTI
-    bool isHintSet = _pluginConfig.is_set_by_user(ov::hint::performance_mode) || config.find(ov::hint::performance_mode.name()) != config.end();
+    bool isHintSet = _pluginConfig.is_set_by_user(ov::hint::performance_mode) || inputConfig.find(ov::hint::performance_mode.name()) != inputConfig.end();
     if (!isHintSet) {
         if (workModeAuto) {
             // set performance hint to 'LATENCY' model for AutoExecutable Network.
@@ -369,6 +369,17 @@ IExecutableNetworkInternal::Ptr MultiDeviceInferencePlugin::LoadNetworkImpl(cons
             loadConfig.set_property(ov::hint::performance_mode(ov::hint::PerformanceMode::THROUGHPUT));
         }
     }
+    // Add core properties
+    auto config = inputConfig;
+    auto cache_dir = GetCore()->GetConfig(GetName(), ov::cache_dir.name());
+    if (!cache_dir.empty()) {
+        config[ov::cache_dir.name()] = cache_dir.as<std::string>();
+    }
+    config[ov::auto_batch_timeout.name()] =
+        GetCore()->GetConfig(GetName(), ov::auto_batch_timeout.name()).as<std::string>();
+    config[ov::hint::allow_auto_batching.name()] =
+        GetCore()->GetConfig(GetName(), ov::hint::allow_auto_batching.name()).as<std::string>();
+
     // updateFromMap will check config valid
     loadConfig.set_user_property(PreProcessConfig(config), workModeAuto? true : false);
     loadConfig.apply_user_properties();
@@ -675,7 +686,6 @@ QueryNetworkResult MultiDeviceInferencePlugin::QueryNetwork(const CNNNetwork&   
     // this can be updated when plugin switch to 2.0 API
     std::map<std::string, std::string> fullConfig =  ConvertToStringMap(fullproperty);;
     auto priorities = fullConfig.find(ov::device::priorities.name());
-
     if (!priorities->second.empty()) {
         auto metaDevices = ParseMetaDevices(priorities->second, fullConfig);
         std::unordered_set<std::string> supportedLayers;

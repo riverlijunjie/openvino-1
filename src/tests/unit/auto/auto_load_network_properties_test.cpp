@@ -165,8 +165,9 @@ public:
         ON_CALL(*gpuMockIExeNet.get(), GetMetric(StrEq(METRIC_KEY(OPTIMAL_NUMBER_OF_INFER_REQUESTS))))
             .WillByDefault(Return("0"));
 
-        std::set<std::string> coreConfigs = {"CACHE_DIR", "AUTO_BATCH_TIMEOUT", "ALLOW_AUTO_BATCHING"};
-        ON_CALL(*core, GetMetric(_, StrEq("CORE_PROPERTY_KEYS"), _)).WillByDefault(Return(coreConfigs));
+        ON_CALL(*core, GetConfig(_, StrEq(ov::cache_dir.name()))).WillByDefault(Return(""));
+        ON_CALL(*core, GetConfig(_, StrEq(ov::auto_batch_timeout.name()))).WillByDefault(Return("1000"));
+        ON_CALL(*core, GetConfig(_, StrEq(ov::hint::allow_auto_batching.name()))).WillByDefault(Return("YES"));
 
         std::vector<std::string> availableDevs = {"CPU", "GPU"};
         ON_CALL(*core, GetAvailableDevices()).WillByDefault(Return(availableDevs));
