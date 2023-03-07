@@ -297,7 +297,7 @@ std::vector<std::vector<ov::test::InputShape>> inputShapes_Int32 = {
 std::vector<CPUSpecificParams> cpuParams_4D = {
 #if defined(OPENVINO_ARCH_X86) || defined(OPENVINO_ARCH_X86_64)
         CPUSpecificParams({nChw16c}, {nChw16c}, {}, {}),
-        CPUSpecificParams({nhwc}, {nhwc}, {}, {})
+        CPUSpecificParams({nhwc}, {nhwc}, {}, {}),
 #endif
         CPUSpecificParams({nchw}, {nchw}, {}, {}),
 };
@@ -305,7 +305,7 @@ std::vector<CPUSpecificParams> cpuParams_4D = {
 std::vector<CPUSpecificParams> cpuParams_5D = {
 #if defined(OPENVINO_ARCH_X86) || defined(OPENVINO_ARCH_X86_64)
         CPUSpecificParams({nCdhw16c}, {nCdhw16c}, {}, {}),
-        CPUSpecificParams({ndhwc}, {ndhwc}, {}, {})
+        CPUSpecificParams({ndhwc}, {ndhwc}, {}, {}),
 #endif
         CPUSpecificParams({ncdhw}, {ncdhw}, {}, {}),
 };
