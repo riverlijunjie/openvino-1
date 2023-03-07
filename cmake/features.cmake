@@ -8,9 +8,10 @@
 
 #ie_dependent_option (ENABLE_INTEL_CPU "CPU plugin for OpenVINO Runtime" ON "RISCV64 OR X86 OR X86_64 OR AARCH64" OFF)
 if (EMSCRIPTEN)
-    ie_dependent_option (ENABLE_INTEL_CPU "CPU plugin for OpenVINO Runtime" ON "RISCV64 OR X86_64" OFF)
+    ie_dependent_option (ENABLE_INTEL_CPU "CPU plugin for OpenVINO Runtime" ON "RISCV64 OR X86_64 OR X86" OFF)
 else()
     ie_dependent_option (ENABLE_INTEL_CPU "CPU plugin for OpenVINO Runtime" ON "RISCV64 OR X86 OR X86_64" OFF)
+    message("CPU pugin is $ENABLE_INTEL_CPU")
 endif()
 
 ie_option (ENABLE_TESTS "unit, behavior and functional tests" OFF)
