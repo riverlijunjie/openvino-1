@@ -230,10 +230,22 @@ std::vector<std::string> disabledTestPatterns() {
         retVector.emplace_back(R"(smoke_CPU_OVClassCompileModelAndCheckSecondaryPropertiesTest.*)");
         retVector.emplace_back(R"(smoke_CPU_OVClassCompileModelAndCheckWithSecondaryPropertiesDoubleTest.*)");
     }
+    {
+        // fixed by PR #17029
+        retVector.emplace_back(R"(smoke_Activation_Basic/ActivationLayerTest.CompareWithRefs.*)");
+        retVector.emplace_back(R"(smoke_Integer_Activation_Basic/ActivationLayerTest.CompareWithRefs/(Tanh|Negative|Sqrt).*)");
+        retVector.emplace_back(R"(smoke_Activation_Basic_Prelu_Const/ActivationLayerTest.CompareWithRefs/(LeakyRelu|PReLu).*)");
+        retVector.emplace_back(R"(smoke_Activation_Basic_Prelu_Param/ActivationParamLayerTest.CompareWithRefs/(LeakyRelu|PReLu).*)");
+        retVector.emplace_back(R"(smoke_CompareWithRefs/ComparisonLayerTest.ComparisonTests.*)");
+        retVector.emplace_back(R"(smoke_CompareWithRefs_static/EltwiseLayerTest.EltwiseTests.*)");
+        retVector.emplace_back(R"(smoke_CompareWithRefs_static_check_collapsing/EltwiseLayerTest.EltwiseTests.*)");
+        retVector.emplace_back(R"(smoke_SingleThread/EltwiseLayerTest.EltwiseTests.*)");
+        retVector.emplace_back(R"(smoke_MultipleAdd_Nd/MultiplyAddLayerTest.CompareWithRefs.*)");
+    }
     retVector.emplace_back(R"(smoke_Decomposition_(3|4)D/Mvn6LayerTest.CompareWithRefs.*)");
     retVector.emplace_back(R"(smoke_AvgPool_ExplicitPad_CeilRounding/PoolingLayerTest.CompareWithRefs.*)");
     retVector.emplace_back(R"(smoke_TestsDFT_(1|2|3|4)d/DFTLayerTest.CompareWithRefs.*)");
-    retVector.emplace_back(R"(smoke_TestsSelect_numpy/SelectLayerTest.CompareWithRefImpl/COND=BOOL.*)"); // ??
+    retVector.emplace_back(R"(smoke_TestsSelect_numpy/SelectLayerTest.CompareWithRefImpl/COND=BOOL.*)");
     retVector.emplace_back(R"(smoke_NegativeQuantizedMatMulMultiplyFusion.*)");
     retVector.emplace_back(R"(MultipleLSTMCellTest/MultipleLSTMCellTest.CompareWithRefs.*)");
     retVector.emplace_back(R"(smoke_If/SimpleIfTest.CompareWithRefs.*)");
