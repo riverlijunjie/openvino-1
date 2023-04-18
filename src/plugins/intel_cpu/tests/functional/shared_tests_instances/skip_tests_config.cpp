@@ -245,11 +245,11 @@ std::vector<std::string> disabledTestPatterns() {
     retVector.emplace_back(R"(smoke_Decomposition_(3|4)D/Mvn6LayerTest.CompareWithRefs.*)");
     retVector.emplace_back(R"(smoke_AvgPool_ExplicitPad_CeilRounding/PoolingLayerTest.CompareWithRefs.*)");
     retVector.emplace_back(R"(smoke_TestsDFT_(1|2|3|4)d/DFTLayerTest.CompareWithRefs.*)");
-    retVector.emplace_back(R"(smoke_TestsSelect_numpy/SelectLayerTest.CompareWithRefImpl/COND=BOOL.*)");
-    retVector.emplace_back(R"(smoke_NegativeQuantizedMatMulMultiplyFusion.*)");
     retVector.emplace_back(R"(MultipleLSTMCellTest/MultipleLSTMCellTest.CompareWithRefs.*)");
     retVector.emplace_back(R"(smoke_If/SimpleIfTest.CompareWithRefs.*)");
     retVector.emplace_back(R"(smoke_If/SimpleIfNotConstConditionTest.CompareWithRefs.*)");
+    // invalid test: checks u8 precision for runtime graph, while it should be f32
+    retVector.emplace_back(R"(smoke_NegativeQuantizedMatMulMultiplyFusion.*)");
     // int8 / code-generation specific
     retVector.emplace_back(R"(smoke_LPT.*)");
     retVector.emplace_back(R"(smoke_Snippets.*)");
