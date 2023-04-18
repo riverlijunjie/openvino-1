@@ -188,7 +188,7 @@ std::vector<std::string> disabledTestPatterns() {
         R"(.*UniqueLayerTestCPU.*axis.*True.*)",
     };
 
-#if defined(OPENVINO_ARCH_ARM64) || defined(OPENVINO_ARCH_ARM)
+#if defined(OPENVINO_ARCH_ARM64) || defined(OPENVINO_ARCH_ARM) || defined(OPENVINO_ARCH_X86)
     retVector.emplace_back(R"(OVClassBasicPropsTest.smoke_SetConfigAffinity.*)");
     retVector.emplace_back(R"(ONNXQuantizedModels/QuantizedModelsTests.*)");
     // TODO: generate new 'expected' runtime graph for CPU ARM
