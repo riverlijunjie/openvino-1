@@ -114,11 +114,12 @@ inline int parallel_get_env_threads() {
 
 #elif OV_THREAD == OV_THREAD_SEQ
 #    include <algorithm>
+#    include <thread>
 inline int parallel_get_env_threads() {
-    return 1;
+    return std::thread::hardware_concurrency();
 }
 inline int parallel_get_max_threads() {
-    return 1;
+    return std::thread::hardware_concurrency();
 }
 inline int parallel_get_num_threads() {
     return 1;

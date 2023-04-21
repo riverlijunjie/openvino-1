@@ -370,6 +370,9 @@ struct CPUStreamsExecutor::Impl {
             }
         }
 #endif
+
+        std::cout << "thread_per_stream = " << _config._threadsPerStream << ", stream_num = " << _config._streams
+                  << std::endl;
         for (auto streamId = 0; streamId < _config._streams; ++streamId) {
             _threads.emplace_back([this, streamId] {
                 openvino::itt::threadName(_config._name + "_" + std::to_string(streamId));

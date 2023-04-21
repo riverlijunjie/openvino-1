@@ -488,6 +488,16 @@ IStreamsExecutor::Config IStreamsExecutor::Config::make_default_multi_threaded(c
                        << ")  ECore: " << streamExecutorConfig._small_core_streams << "("
                        << streamExecutorConfig._threads_per_stream_small << ")";
     }
+#elif OV_THREAD == OV_THREAD_SEQ
+    if (bLatencyCase) {
+        streamExecutorConfig._streams = 1;
+        streamExecutorConfig._threads = 1;
+    } else if (streamExecutorConfig._streams == 0 || streamExecutorConfig._threads == 0) {
+        streamExecutorConfig._streams = envThreads;
+        streamExecutorConfig._threads = envThreads;
+    } else {
+        streamExecutorConfig._streams = streamExecutorConfig._threads;
+    }
 #endif
     const auto hwCores =
         !bLatencyCase && numaNodesNum == 1

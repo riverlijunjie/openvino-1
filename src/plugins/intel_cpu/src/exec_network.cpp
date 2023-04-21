@@ -109,6 +109,10 @@ ExecNetwork::ExecNetwork(const InferenceEngine::CNNNetwork &network,
 #if FIX_62820 && (IE_THREAD == IE_THREAD_TBB || IE_THREAD == IE_THREAD_TBB_AUTO)
         _taskExecutor = std::make_shared<TBBStreamsExecutor>(streamsExecutorConfig);
 #else
+        streamsExecutorConfig =
+            InferenceEngine::IStreamsExecutor::Config::MakeDefaultMultiThreaded(_cfg.streamExecutorConfig,
+                                                                                isFloatModel);
+        _cfg.streamExecutorConfig._streams = streamsExecutorConfig._streams;
         _taskExecutor = _plugin->executorManager()->getIdleCPUStreamsExecutor(streamsExecutorConfig);
 #endif
     }
