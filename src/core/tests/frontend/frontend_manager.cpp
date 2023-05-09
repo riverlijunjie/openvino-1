@@ -15,11 +15,6 @@
 
 using namespace ov::frontend;
 
-static std::string mock_fe_path() {
-    static auto lib_name = std::string(FRONTEND_LIB_PREFIX) + "mock1" + std::string(FRONTEND_LIB_SUFFIX);
-    return ov::util::path_join({CommonTestUtils::getExecutableDirectory(), lib_name});
-}
-
 TEST(FrontEndManagerTest, testAvailableFrontEnds) {
     FrontEndManager fem;
     class MockFrontEnd : public FrontEnd {};
@@ -38,6 +33,13 @@ TEST(FrontEndManagerTest, testAvailableFrontEnds) {
     fem2 = FrontEndManager();
     frontends = fem2.get_available_front_ends();
     ASSERT_EQ(std::find(frontends.begin(), frontends.end(), "mock"), frontends.end());
+}
+// Disable the following tests, caused by unsupported "readlink()" func call in WASM
+#ifndef __EMSCRIPTEN__
+
+static std::string mock_fe_path() {
+    static auto lib_name = std::string(FRONTEND_LIB_PREFIX) + "mock1" + std::string(FRONTEND_LIB_SUFFIX);
+    return ov::util::path_join({CommonTestUtils::getExecutableDirectory(), lib_name});
 }
 
 TEST(FrontEndManagerTest, testFailRegisterFEByWrongPath) {
@@ -132,6 +134,8 @@ TEST(FrontEndManagerTest, testDefaultFrontEnd) {
     ASSERT_ANY_THROW(fe->normalize(nullptr));
     ASSERT_EQ(fe->get_name(), std::string());
 }
+
+#endif
 
 TEST(FrontEndManagerTest, testDefaultInputModel) {
     class MockInputModel : public InputModel {};
@@ -308,6 +312,9 @@ TEST(FrontEndExceptionTest, frontend_initialization_error_throw_info) {
     FAIL() << "Test is expected to throw an exception.";
 }
 
+// Disable the following tests, caused by unsupported "readlink()" func call in WASM
+#ifndef __EMSCRIPTEN__
+
 // FrontEndManager exception safety
 #define CHECK_EXCEPTION_FRONTEND(statement)                                                             \
     try {                                                                                               \
@@ -479,3 +486,5 @@ TEST(FrontEndManagerTest, Exception_Safety_Input_Model_set_tensor_value) {
 TEST(FrontEndManagerTest, Exception_Safety_Input_Model_set_tensor_partial_value) {
     CHECK_EXCEPTION_INPUT_MODEL(input_model->set_tensor_partial_value({}, {}, {}))
 }
+
+#endif
