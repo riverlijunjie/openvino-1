@@ -76,8 +76,9 @@ std::shared_ptr<Function> function_from_ir(const std::string& xml_path, const st
 std::pair<testing::AssertionResult, size_t> TestCase::compare_results(size_t tolerance_bits) {
     auto res = testing::AssertionSuccess();
     size_t output_idx = 0;
+    const auto results = m_function->get_results();
     for (; output_idx < m_expected_outputs.size(); ++output_idx) {
-        const auto& result_tensor = m_request.get_output_tensor(output_idx);
+        const auto& result_tensor = m_request.get_tensor(results[output_idx]);
         const auto& exp_result = m_expected_outputs.at(output_idx);
 
         const auto& element_type = result_tensor.get_element_type();
@@ -90,6 +91,9 @@ std::pair<testing::AssertionResult, size_t> TestCase::compare_results(size_t tol
                 << ") for output " << output_idx << std::endl;
             break;
         }
+
+        std::cout << " compare: m_expected_outputs.precision = " << exp_result.get_element_type()
+                  << ", result.precision = " << result_tensor.get_element_type() << std::endl;
 
         switch (element_type) {
         case ov::element::Type_t::f16:
@@ -157,6 +161,9 @@ testing::AssertionResult TestCase::compare_results_with_tolerance_as_fp(float to
                               << expected_shape << ") for output " << i << std::endl;
             break;
         }
+
+        std::cout << " compare_fp: m_expected_outputs.precision = " << exp_result.get_element_type()
+                  << ", result.precision = " << result_tensor.get_element_type() << std::endl;
 
         switch (element_type) {
         case element::Type_t::f32:

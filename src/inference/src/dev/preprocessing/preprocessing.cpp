@@ -33,6 +33,9 @@ bool ov::pass::AddPreprocessing::run_on_model(const std::shared_ptr<ov::Model>& 
         preproc.input(i).tensor().set_element_type(
             InferenceEngine::details::convertPrecision(input_info->getPrecision()));
 
+        std::cout << "preprocess: set input precision " << model->input(i).get_element_type() << " --> "
+                  << InferenceEngine::details::convertPrecision(input_info->getPrecision()) << std::endl;
+
         if (input_info->getLayout() != InferenceEngine::Layout::BLOCKED &&
             input_info->getLayout() != InferenceEngine::Layout::SCALAR) {
             std::stringstream stream;
@@ -119,6 +122,8 @@ bool ov::pass::AddPreprocessing::run_on_model(const std::shared_ptr<ov::Model>& 
         ov::legacy_convert::fill_output_info(const_output, output_info);
         OPENVINO_ASSERT(output_info);
         auto element_type = InferenceEngine::details::convertPrecision(output_info->getPrecision());
+        std::cout << "preprocess: set output precision " << model->output(i).get_element_type() << " --> "
+                  << element_type << std::endl;
         if (element_type != model->output(i).get_element_type()) {
             preproc.output(i).tensor().set_element_type(element_type);
         }
