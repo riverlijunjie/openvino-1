@@ -59,6 +59,8 @@ bool fuse_type_to_random_uniform_v8(const std::shared_ptr<ngraph::Node>& node, c
 
 bool extend_select_type(const std::shared_ptr<ngraph::Node>& node, const precisions_map& precisions);
 bool extend_reverse_type(const std::shared_ptr<ngraph::Node>& node, const precisions_map& precisions);
+bool extend_isFinite_type(const std::shared_ptr<ngraph::Node>& node, const precisions_map& precisions);
+bool extend_isNaN_type(const std::shared_ptr<ngraph::Node>& node, const precisions_map& precisions);
 
 template <typename T>
 bool fuse_type_to_binary_comparision(const std::shared_ptr<ngraph::Node>& node, const precisions_map& precisions) {
@@ -359,6 +361,8 @@ bool ov::pass::ConvertPrecision::run_on_model(const std::shared_ptr<ngraph::Func
         {opset4::Range::get_type_info_static(), fuse_type_to_range_v4},
         {opset9::Eye::get_type_info_static(), fuse_type_to_eye_v9},
         {opset10::Unique::get_type_info_static(), fuse_type_to_unique_v10},
+        {opset10::IsFinite::get_type_info_static(), fuse_type_to_reduce_logical<opset10::IsFinite>},
+        {opset10::IsNaN::get_type_info_static(), fuse_type_to_reduce_logical<opset10::IsNaN>},
         {opset8::RandomUniform::get_type_info_static(), fuse_type_to_random_uniform_v8}};
 
     for (const auto& it : m_additional_type_to_fuse_map) {
