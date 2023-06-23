@@ -376,12 +376,12 @@ void SyncInferRequest::throw_if_canceled() const {
 InferenceEngine::Precision SyncInferRequest::normToInputSupportedPrec(
     const std::pair<const std::string, ov::Tensor>& input) const {
     auto inPrec = InferenceEngine::details::convertPrecision(input.second.get_element_type());
-    if (graph->hasMeanImageFor(input.first) &&
-        one_of(inPrec, InferenceEngine::Precision::U8, InferenceEngine::Precision::BOOL)) {
-        inPrec = InferenceEngine::Precision::FP32;
-    } else {
-        inPrec = normalizeToSupportedPrecision(inPrec);
-    }
+    // if (graph->hasMeanImageFor(input.first) &&
+    //    one_of(inPrec, InferenceEngine::Precision::U8, InferenceEngine::Precision::BOOL)) {
+    //    inPrec = InferenceEngine::Precision::FP32;
+    // } else {
+    //    inPrec = normalizeToSupportedPrecision(inPrec);
+    // }
 
     if (inPrec == InferenceEngine::Precision::UNSPECIFIED) {
         OPENVINO_THROW("Unsupported input precision ", input.second.get_element_type());
