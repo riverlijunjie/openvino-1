@@ -478,15 +478,6 @@ ov::Tensor SyncInferRequest::get_tensor(const ov::Output<const ov::Node>& in_por
         if (m_aux_tensors[port_name].get_shape() != aux_shape)
             m_aux_tensors[port_name].set_shape(aux_shape);
     }
-
-    auto is_compiled_model_port = check_compiled_model_port(in_port);
-    if (is_compiled_model_port) {
-        // compiled model's port
-        m_port_tensor_need_converted[port_name] = false;
-        return port_tensor;
-    }
-
-    // original model's port
     m_port_tensor_need_converted[port_name] = true;
     return m_aux_tensors[port_name];
 }
