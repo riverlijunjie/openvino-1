@@ -66,7 +66,7 @@ private:
     // Transformation shouldn't change model's input/output's precision, but actually it does.
     // Some additional methods will handle it.
     const ov::Output<const ov::Node>& get_internal_port(const ov::Output<const ov::Node>& port) const;
-    ov::Tensor get_port_tensor(const ov::Output<const ov::Node>& port) const;
+    ov::Tensor get_port_tensor(const ov::Output<const ov::Node>& port);
     // Check this port is original model port or compiled model's port, return true for compiled model's port
     // This is because if precision has been changed in compiled model, it needs distinguish them
     bool check_compiled_model_port(const ov::Output<const ov::Node>& port) const;
@@ -84,6 +84,7 @@ private:
     mutable std::unordered_map<std::string, ov::Output<const ov::Node>> m_input_ports_map;
     mutable std::unordered_map<std::string, ov::Output<const ov::Node>> m_output_ports_map;
     std::unordered_map<std::string, ov::Tensor> m_outputs;
+    std::unordered_map<std::string, ov::Tensor> m_inputs;
 
 protected:
     virtual void change_default_ptr();

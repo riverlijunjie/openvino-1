@@ -419,12 +419,21 @@ InferenceEngine::TensorDesc SyncInferRequest::create_tensor_desc(const ov::Tenso
     OPENVINO_SUPPRESS_DEPRECATED_END
 }
 
-ov::Tensor SyncInferRequest::get_port_tensor(const ov::Output<const ov::Node>& in_port) const {
-    check_compiled_model_port(in_port);
+ov::Tensor SyncInferRequest::get_port_tensor(const ov::Output<const ov::Node>& in_port) {
+    // check_compiled_model_port(in_port);
     auto port = get_internal_port(in_port);
-    auto tensor = ov::ISyncInferRequest::get_tensor(port);
     auto name = get_port_name(in_port, m_is_legacy_api);
-
+#if 1
+    bool is_input = ov::op::util::is_parameter(port.get_node());
+    ov::Tensor tensor;
+    if (is_input) {
+        tensor = m_inputs[name];
+    } else {
+        tensor = m_outputs[name];
+    }
+#else
+    ov::Tensor tensor = ov::ISyncInferRequest::get_tensor(port);
+#endif
     if (m_aux_tensors.find(name) != m_aux_tensors.end()) {
         auto& aux_tensor = m_aux_tensors[name];
         if (aux_tensor.get_shape() != tensor.get_shape()) {
@@ -586,6 +595,7 @@ void SyncInferRequest::set_tensor(const ov::Output<const ov::Node>& in_port, con
         } else if (external_ptr.find(name) != external_ptr.end()) {
             external_ptr.erase(name);
         }
+        m_inputs[name] = tensor;
     } else {
         const auto netOutPrc = port.get_element_type();
         if (netOutPrc != tensor.get_element_type()) {
@@ -667,6 +677,7 @@ void SyncInferRequest::init_tensor(const std::string& name) {
 
                 tensor = ov::Tensor(port.get_element_type(), tensor_shape);
                 ov::ISyncInferRequest::set_tensor(port, tensor);
+                m_inputs[name] = tensor;
 
                 auto desc = create_tensor_desc(tensor);
                 if (!isDynamic &&

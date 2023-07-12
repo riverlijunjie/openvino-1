@@ -110,6 +110,7 @@ const std::shared_ptr<const ov::ICompiledModel>& ov::ISyncInferRequest::get_comp
 }
 
 ov::ISyncInferRequest::FoundPort ov::ISyncInferRequest::find_port(const ov::Output<const ov::Node>& port) const {
+    // This function is hotspot, need optimization on it.
     auto check_nodes = [](const ov::Node* node1, const ov::Node* node2) {
         return node1 == node2 ||
                (node1->get_friendly_name() == node2->get_friendly_name() &&
@@ -251,7 +252,10 @@ void ov::ISyncInferRequest::check_tensor(const ov::Output<const ov::Node>& port,
                     " expecting ",
                     port.get_shape(),
                     ".");
-    OPENVINO_ASSERT(tensor.is<ov::RemoteTensor>() || tensor.data() != nullptr, "Tensor data equal nullptr!");
+    // tensor.is<ov::RemoteTensor>() is heavy function, it impacts performance greatly.
+    // OPENVINO_ASSERT(tensor.is<ov::RemoteTensor>() || tensor.data() != nullptr, "Tensor data equal nullptr!");
+    auto remote_tensor = std::dynamic_pointer_cast<ov::IRemoteTensor>(tensor._impl);
+    OPENVINO_ASSERT(remote_tensor || tensor.data() != nullptr, "Tensor data equal nullptr!");
 }
 
 void ov::ISyncInferRequest::allocate_tensor(const ov::Output<const ov::Node>& port,
