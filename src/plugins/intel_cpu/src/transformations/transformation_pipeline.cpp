@@ -134,17 +134,20 @@ bool Transformations::fuse_type_to_convert(const std::shared_ptr<ngraph::Node>& 
     if (!convert)
         return false;
 
-    // For "Parameter->Convert" , set supported precision to convert's input tensor to avoid introducing unsupported
+#if 0
+    // For "Parameter->Convert", set supported precision to convert's input tensor to avoid introducing unsupported
     // precision into dnnl level.
     auto parameter_node = ov::as_type_ptr<ov::op::v0::Parameter>(convert->input_value(0).get_node_shared_ptr());
     if (parameter_node) {
         const auto& prec = node->get_input_element_type(0);
         auto item = precisions.find(prec);
         if (item != precisions.end()) {
+            std::cout << "Convert tensor precision: " << convert->input_value(0).get_tensor().get_element_type()
+                      << " to " << item->second << std::endl;
             convert->input_value(0).get_tensor().set_element_type(item->second);
         }
     }
-
+#endif
     const auto& from = node->get_output_element_type(0);
     auto it = precisions.find(from);
     if (it == precisions.end())

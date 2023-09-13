@@ -504,6 +504,16 @@ void Graph::InitEdges() {
         numberOfEdges--;
     };
 
+    {
+        static std::mutex _lock;
+        std::lock_guard<std::mutex> guard(_lock);
+        std::cout << "Before init_edge(): " << std::endl;
+        for (auto edge : graphEdges) {
+            std::cout << "  edge: " << edge->name() << ", input_prec = " << edge->getInputDesc().getPrecision()
+                      << ", out_prec = " << edge->getOutputDesc().getPrecision() << std::endl;
+        }
+    }
+
     for (ptrdiff_t i = 0; i < numberOfEdges; i++) {
         auto edge = graphEdges[i];
         auto reorderStatus = graphEdges[i]->needReorder();
@@ -573,6 +583,16 @@ void Graph::InitEdges() {
             constexpr bool optimizedReorder = false;
             insertReorder(edge, optimizedReorder);
             updateEdge(i);
+        }
+    }
+
+     {
+        static std::mutex _lock;
+        std::lock_guard<std::mutex> guard(_lock);
+        std::cout << "After init_edge(): " << std::endl;
+        for (auto edge : graphEdges) {
+            std::cout << "  edge: " << edge->name() << ", input_prec = " << edge->getInputDesc().getPrecision()
+                      << ", out_prec = " << edge->getOutputDesc().getPrecision() << std::endl;
         }
     }
 }
