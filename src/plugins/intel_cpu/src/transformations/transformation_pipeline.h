@@ -59,6 +59,8 @@ private:
     void PostSnippets(void);
 
     static bool fuse_type_to_convert(const std::shared_ptr<ngraph::Node>& node, const precisions_map& precisions);
+    static bool insert_input_output_convert(const std::shared_ptr<ngraph::Node>& node,
+                                            const precisions_map& precisions);
 };
 
 }   // namespace intel_cpu
