@@ -510,7 +510,7 @@ void Graph::InitEdges() {
         numberOfEdges--;
     };
 
-#if 1
+#if 0
     {
         static std::mutex _lock;
         std::lock_guard<std::mutex> guard(_lock);
@@ -598,7 +598,7 @@ void Graph::InitEdges() {
             updateEdge(i);
         }
     }
-#if 1
+#if 0
         {
         static std::mutex _lock;
         std::lock_guard<std::mutex> guard(_lock);

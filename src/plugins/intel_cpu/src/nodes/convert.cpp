@@ -126,7 +126,16 @@ void Convert::initSupportedPrimitiveDescriptors() {
         config.outConfs.push_back(dataConfigOut);
 
         auto creators = BlockedDescCreator::getCommonCreators();
-        auto range = BlockedDescCreator::makeFilteredRange(creators, insShape.getRank());
+        bool hasOutputChild = false;
+        for (auto& childEdge : getChildEdgesAtPort(0)) {
+            if (Type::Output == childEdge->getChild()->getType()) {
+                hasOutputChild = true;
+                break;
+            }
+        }
+        auto range = hasOutputChild
+                         ? BlockedDescCreator::makeFilteredRange(creators, insShape.getRank(), {LayoutType::ncsp})
+                         : BlockedDescCreator::makeFilteredRange(creators, insShape.getRank());
 
         for (auto itr = range.first; itr != range.second; ++itr) {
             config.inConfs[0].setMemDesc(std::make_shared<CpuBlockedMemoryDesc>(itr->second->createDesc(insPrecision, insShape)));
