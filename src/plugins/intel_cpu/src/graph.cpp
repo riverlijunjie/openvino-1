@@ -213,11 +213,11 @@ void Graph::Replicate(const std::shared_ptr<const ov::Model> &model) {
         OPENVINO_THROW("Cannot find input port with name: ", name);
     };
     // change precision for input/output nodes to avoid extra data conversion when set input/output blobs
-    for (auto &input : inputNodesMap) {
-        auto prec = InferenceEngine::details::convertPrecision(find_input_port_prec(input.first));
-        const auto precToSet = normalizeToSupportedPrecision(prec);
-        input.second->setOriginalOutputPrecisionAtPort(0, precToSet);
-    }
+    // for (auto &input : inputNodesMap) {
+    //    auto prec = InferenceEngine::details::convertPrecision(find_input_port_prec(input.first));
+    //    const auto precToSet = normalizeToSupportedPrecision(prec);
+    //    input.second->setOriginalOutputPrecisionAtPort(0, precToSet);
+    //}
 
     auto find_output_port_prec = [&](const std::string& name) -> ov::element::Type_t {
         for (auto& it : model->outputs()) {
@@ -230,11 +230,11 @@ void Graph::Replicate(const std::shared_ptr<const ov::Model> &model) {
         }
         OPENVINO_THROW("Cannot find output port with name: ", name);
     };
-    for (auto &output : outputNodesMap) {
-        auto prec = InferenceEngine::details::convertPrecision(find_output_port_prec(output.first));
-        const auto precToSet = normalizeToSupportedPrecision(prec);
-        output.second->setOriginalInputPrecisionAtPort(0, precToSet);
-    }
+    // for (auto &output : outputNodesMap) {
+    //    auto prec = InferenceEngine::details::convertPrecision(find_output_port_prec(output.first));
+    //    const auto precToSet = normalizeToSupportedPrecision(prec);
+    //    output.second->setOriginalInputPrecisionAtPort(0, precToSet);
+    //}
     // enforce must be performed after inputs and outputs info are taken into account
     EnforceInferencePrecision();
     // also we need to change input/output precisions for consumers/producers to avoid inserting reorder
@@ -445,6 +445,32 @@ void Graph::CreatePrimitivesAndExecConstants() const {
     }
 }
 
+static bool isReorderAvailable(const MemoryDescPtr& parentDesc, const MemoryDescPtr& childDesc, const dnnl::engine& eng) {
+    auto definedParentDesc = parentDesc->isDefined() ? parentDesc : MemoryDescUtils::makeDummyDesc(*parentDesc);
+    memory::desc srcMemDesc = MemoryDescUtils::convertToDnnlMemoryDesc(definedParentDesc)->getDnnlDesc();
+
+    auto definedChildDesc = childDesc->isDefined() ? childDesc : MemoryDescUtils::makeDummyDesc(*childDesc);
+    memory::desc dstMemDesc = MemoryDescUtils::convertToDnnlMemoryDesc(definedChildDesc)->getDnnlDesc();
+
+    dnnl::primitive_attr attr;
+
+    dnnl_primitive_desc_t result = nullptr;
+    auto status = dnnl_reorder_primitive_desc_create(&result, srcMemDesc.get(), eng.get(), dstMemDesc.get(), eng.get(),
+                                                     attr.get());
+#if defined(OV_CPU_ARM_ENABLE_FP16)
+    // temporary WA for slow FP32->FP16 conversion reorder in oneDNN on ARM
+    // pretend the reorder is not available to use Convert node instead
+    if (result && parse_impl_name(result->impl()->name()) == ref_any) {
+        dnnl_primitive_desc_destroy(result);
+        return false;
+    }
+#endif
+    if (result) {
+        dnnl_primitive_desc_destroy(result);
+    }
+
+    return dnnl_success == status;
+}
 void Graph::InitEdges() {
     OV_ITT_SCOPE(FIRST_INFERENCE, itt::domains::intel_cpu_LT, "Graph::InitEdges");
 
@@ -477,6 +503,7 @@ void Graph::InitEdges() {
         numberOfEdges--;
     };
 
+#if 0
     {
         static std::mutex _lock;
         std::lock_guard<std::mutex> guard(_lock);
@@ -486,12 +513,43 @@ void Graph::InitEdges() {
                       << ", out_prec = " << edge->getOutputDesc().getPrecision() << std::endl;
         }
     }
+#endif
+
     for (ptrdiff_t i = 0; i < numberOfEdges; i++) {
         auto edge = graphEdges[i];
         auto reorderStatus = graphEdges[i]->needReorder();
         DEBUG_LOG(graphEdges[i]->name(), " reorderStatus = ", reorderStatus);
         if (reorderStatus == Edge::ReorderStatus::Regular) {
-            insertReorder(edge, false);
+            Edge::ReorderStatus reorderStatusInternal = Edge::ReorderStatus::Regular;
+            // Check if there is a reorder that needs the precision conversion
+            if (edge->getInputDesc().getPrecision() != edge->getOutputDesc().getPrecision() &&
+                !isReorderAvailable(edge->getInputPortDesc()->getMemDesc(),
+                                    edge->getOutputPortDesc()->getMemDesc(),
+                                    this->getEngine())) {
+                // If we are here, then we need to insert Convert, because there are no reorders that support such type
+                // conversion
+                const auto& inDesc = edge->getInputDesc();
+                const auto& outDesc = edge->getOutputDesc();
+
+                std::string convertName = edge->getParent()->getName() + "_" + inDesc.getPrecision().name() + "_" +
+                                          outDesc.getPrecision().name();
+
+                auto convertNode = std::make_shared<node::Convert>(inDesc.getShape(),
+                                                                   inDesc.getPrecision(),
+                                                                   outDesc.getPrecision(),
+                                                                   convertName,
+                                                                   context);
+                convertNode->setDescs(inDesc, outDesc);
+                InsertNode(edge, convertNode, true);
+
+                // Check if reorder is still needed
+                reorderStatusInternal = convertNode->getChildEdgeAt(0)->needReorder();
+                if (reorderStatusInternal != Edge::ReorderStatus::No)
+                    edge = convertNode->getChildEdgeAt(0);
+            }
+            if (reorderStatusInternal != Edge::ReorderStatus::No) {
+                insertReorder(edge, reorderStatusInternal == Edge::ReorderStatus::Optimized);
+            }
             updateEdge(i);
         } else if (reorderStatus == Edge::ReorderStatus::Optimized) {
             insertReorder(edge, true);
@@ -533,7 +591,7 @@ void Graph::InitEdges() {
             updateEdge(i);
         }
     }
-
+#if 0
         {
         static std::mutex _lock;
         std::lock_guard<std::mutex> guard(_lock);
@@ -543,6 +601,7 @@ void Graph::InitEdges() {
                       << ", out_prec = " << edge->getOutputDesc().getPrecision() << std::endl;
         }
     }
+#endif
 }
 
 static inline bool isConstOutput(EdgePtr edge) {

@@ -132,20 +132,6 @@ bool Transformations::fuse_type_to_convert(const std::shared_ptr<ngraph::Node>& 
     auto convert = ov::as_type_ptr<ov::opset10::Convert>(node);
     if (!convert)
         return false;
-
-    // For "Parameter->Convert" , set supported precision to convert's input tensor to avoid introducing unsupported
-    // precision into dnnl level.
-    auto parameter_node = ov::as_type_ptr<ov::op::v0::Parameter>(convert->input_value(0).get_node_shared_ptr());
-    if (parameter_node) {
-        const auto& prec = node->get_input_element_type(0);
-        auto item = precisions.find(prec);
-        if (item != precisions.end()) {
-            std::cout << "Convert tensor precision: " << convert->input_value(0).get_tensor().get_element_type()
-                      << " to " << item->second << std::endl;
-            convert->input_value(0).get_tensor().set_element_type(item->second);
-        }
-    }
-
     const auto& from = node->get_output_element_type(0);
     auto it = precisions.find(from);
     if (it == precisions.end())
@@ -157,52 +143,29 @@ bool Transformations::fuse_type_to_convert(const std::shared_ptr<ngraph::Node>& 
     // Convert node for this scenario.
     if (convert->input(0).get_element_type().is_real() &&
         convert->get_convert_element_type() == ngraph::element::boolean && to.is_integral_number()) {
-        auto abs = std::make_shared<ov::opset10::Abs>(convert->input_value(0).get_node_shared_ptr());
-        auto ceil = std::make_shared<ov::opset10::Ceiling>(abs);
-        auto new_convert = std::make_shared<ov::opset10::Convert>(ceil, to);
-        new_convert->set_friendly_name(convert->get_friendly_name());
-        ov::copy_runtime_info(convert, {abs, ceil, new_convert});
-        ov::replace_node(convert, new_convert);
+        const auto& in_prec = node->get_input_element_type(0);
+        auto item = precisions.find(in_prec);
+        if (item != precisions.end()) {
+            auto pre_convert =
+                std::make_shared<ov::opset10::Convert>(convert->input_value(0).get_node_shared_ptr(), item->second);
+            auto abs = std::make_shared<ov::opset10::Abs>(pre_convert);
+            auto ceil = std::make_shared<ov::opset10::Ceiling>(abs);
+            auto new_convert = std::make_shared<ov::opset10::Convert>(ceil, to);
+            new_convert->set_friendly_name(convert->get_friendly_name());
+            ov::copy_runtime_info(convert, {pre_convert, abs, ceil, new_convert});
+            ov::replace_node(convert, new_convert);
+        } else {
+            auto abs = std::make_shared<ov::opset10::Abs>(convert->input_value(0).get_node_shared_ptr());
+            auto ceil = std::make_shared<ov::opset10::Ceiling>(abs);
+            auto new_convert = std::make_shared<ov::opset10::Convert>(ceil, to);
+            new_convert->set_friendly_name(convert->get_friendly_name());
+            ov::copy_runtime_info(convert, {abs, ceil, new_convert});
+            ov::replace_node(convert, new_convert);
+        }
     } else {
         convert->set_convert_element_type(to);
     }
     return true;
-}
-
-bool Transformations::insert_input_output_convert(const std::shared_ptr<ngraph::Node>& node,
-                                                  const precisions_map& precisions) {
-    return false;
-    // It will enounter "unregistered_parameters.str().empty()" issue.
-    if (auto parameter = ov::as_type_ptr<ov::op::v0::Parameter>(node)) {
-        const auto& prec = parameter->get_output_element_type(0);
-        auto it = precisions.find(prec);
-        if (it == precisions.end())
-            return false;
-        auto new_parameter = std::make_shared<ov::op::v0::Parameter>(parameter->get_element_type(),
-                                                                     parameter->get_output_partial_shape(0));
-        new_parameter->set_friendly_name(parameter->get_friendly_name());
-        const auto& out_prec = it->second;
-        std::cout << "Insert convert after Parameter node: " << prec << " to " << out_prec << std::endl;
-        auto convert = std::make_shared<ov::opset10::Convert>(new_parameter, out_prec);
-        ov::copy_runtime_info(parameter, {new_parameter, convert});
-        ov::replace_node(parameter, new_parameter);
-        return true;
-    }
-    if (auto result = ov::as_type_ptr<ov::op::v0::Result>(node)) {
-        const auto& prec = result->get_input_element_type(0);
-        auto it = precisions.find(prec);
-        if (it == precisions.end())
-            return false;
-        auto new_result = std::make_shared<ov::op::v0::Result>(result);
-        new_result->set_friendly_name(result->get_friendly_name());
-        const auto& out_prec = it->second;
-        std::cout << "Insert convert before Result node: " << prec << " to " << out_prec << std::endl;
-        auto convert = std::make_shared<ov::opset10::Convert>(result->input_value(0).get_node_shared_ptr(), out_prec);
-        ov::copy_runtime_info(result, {convert, new_result});
-        ov::replace_node(result, new_result);
-        return true;
-    }
-    return false;
 }
 
 void Transformations::UpToLpt() {
@@ -301,9 +264,7 @@ void Transformations::PreLpt(const std::vector<ov::element::Type>& defaultPrecis
         return map;
     };
     static const auto precisions = get_convert_precisions();
-    type_to_fuse_map type_to_fuse = {{ov::opset10::Convert::get_type_info_static(), fuse_type_to_convert},
-                                     {ov::op::v0::Parameter::get_type_info_static(), insert_input_output_convert},
-                                     {ov::op::v0::Result::get_type_info_static(), insert_input_output_convert}};
+    type_to_fuse_map type_to_fuse = {{ov::opset10::Convert::get_type_info_static(), fuse_type_to_convert}};
 
     CPU_REGISTER_PASS_COMMON(manager, ov::pass::AUGRUCellFusion);
     CPU_REGISTER_PASS_COMMON(manager, ov::pass::CommonOptimizations);

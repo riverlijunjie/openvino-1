@@ -63,6 +63,7 @@ bool ov::pass::Manager::run_passes(shared_ptr<ov::Model> func) {
     static bool profile_enabled =
         ov::util::getenv_bool("NGRAPH_PROFILE_PASS_ENABLE") || ov::util::getenv_bool("OV_PROFILE_PASS_ENABLE");
 
+    static int idx = 0;
     size_t index = 0;
     ngraph::stopwatch pass_timer;
     ngraph::stopwatch overall_timer;
@@ -124,7 +125,9 @@ bool ov::pass::Manager::run_passes(shared_ptr<ov::Model> func) {
             const size_t num_digits_in_pass_index = 3;
             std::string index_str = std::to_string(index);
             index_str = std::string(num_digits_in_pass_index - index_str.length(), '0') + index_str;
-            auto base_filename = func->get_name() + std::string("_") + index_str + std::string("_") + pass->get_name();
+            idx++;
+            auto base_filename = std::to_string(idx) + func->get_name() + std::string("_") + index_str +
+                                 std::string("_") + pass->get_name();
 
             if (m_visualize) {
                 auto file_ext = "svg";

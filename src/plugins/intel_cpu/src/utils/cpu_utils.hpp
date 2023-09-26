@@ -91,6 +91,7 @@ inline bool isEmptyTensorDesc(const InferenceEngine::TensorDesc &td) {
     return std::any_of(dims.begin(), dims.end(), [](size_t dim) { return dim == 0; } );
 }
 
+#if 0
 /**
 * @brief Return precision to which given precision must be converted to be supported in plug-in
 * @param precision
@@ -133,6 +134,7 @@ inline InferenceEngine::Precision normalizeToSupportedPrecision(InferenceEngine:
 
     return precision;
 }
+#endif
 
 /**
 * @brief Return aligned buffer by targetSize.
