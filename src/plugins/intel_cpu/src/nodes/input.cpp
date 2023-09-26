@@ -482,9 +482,9 @@ void Input::initSupportedPdDefault() {
 
     if (getType() == Type::Input || getType() == Type::MemoryInput) {
         auto precision = getOriginalOutputPrecisionAtPort(0);
-        if (precision == Precision::U16 || isMeanImage) {
-            precision = Precision::FP32;
-        }
+        // if (precision == Precision::U16 || isMeanImage) {
+        //     precision = Precision::FP32;
+        //}
 
         outPortConfs.push_back({LayoutType::ncsp, precision});
         if (!getParentEdges().empty()) {
@@ -492,7 +492,7 @@ void Input::initSupportedPdDefault() {
         }
     } else if (getType() == Type::Output) {
         auto precision = getOriginalInputPrecisionAtPort(0);
-        if (precision == Precision::U16) precision = Precision::FP32;
+        // if (precision == Precision::U16) precision = Precision::FP32;
 
         inPortConfs.push_back({LayoutType::ncsp, precision});
     }

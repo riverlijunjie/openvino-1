@@ -201,6 +201,7 @@ void Graph::Replicate(const std::shared_ptr<const ov::Model> &model) {
         });
     };
 
+#if 0
     auto find_input_port_prec = [&](const std::string& name) -> ov::element::Type_t {
         for (auto& it : model->inputs()) {
             auto port_name = get_port_name(it, is_legacy_api);
@@ -213,11 +214,11 @@ void Graph::Replicate(const std::shared_ptr<const ov::Model> &model) {
         OPENVINO_THROW("Cannot find input port with name: ", name);
     };
     // change precision for input/output nodes to avoid extra data conversion when set input/output blobs
-    // for (auto &input : inputNodesMap) {
-    //    auto prec = InferenceEngine::details::convertPrecision(find_input_port_prec(input.first));
-    //    const auto precToSet = normalizeToSupportedPrecision(prec);
-    //    input.second->setOriginalOutputPrecisionAtPort(0, precToSet);
-    //}
+    for (auto& input : inputNodesMap) {
+        auto prec = InferenceEngine::details::convertPrecision(find_input_port_prec(input.first));
+        const auto precToSet = normalizeToSupportedPrecision(prec);
+        input.second->setOriginalOutputPrecisionAtPort(0, precToSet);
+    }
 
     auto find_output_port_prec = [&](const std::string& name) -> ov::element::Type_t {
         for (auto& it : model->outputs()) {
@@ -230,11 +231,12 @@ void Graph::Replicate(const std::shared_ptr<const ov::Model> &model) {
         }
         OPENVINO_THROW("Cannot find output port with name: ", name);
     };
-    // for (auto &output : outputNodesMap) {
-    //    auto prec = InferenceEngine::details::convertPrecision(find_output_port_prec(output.first));
-    //    const auto precToSet = normalizeToSupportedPrecision(prec);
-    //    output.second->setOriginalInputPrecisionAtPort(0, precToSet);
-    //}
+    for (auto &output : outputNodesMap) {
+        auto prec = InferenceEngine::details::convertPrecision(find_output_port_prec(output.first));
+        const auto precToSet = normalizeToSupportedPrecision(prec);
+        output.second->setOriginalInputPrecisionAtPort(0, precToSet);
+    }
+#endif
     // enforce must be performed after inputs and outputs info are taken into account
     EnforceInferencePrecision();
     // also we need to change input/output precisions for consumers/producers to avoid inserting reorder
@@ -446,11 +448,16 @@ void Graph::CreatePrimitivesAndExecConstants() const {
 }
 
 static bool isReorderAvailable(const MemoryDescPtr& parentDesc, const MemoryDescPtr& childDesc, const dnnl::engine& eng) {
-    auto definedParentDesc = parentDesc->isDefined() ? parentDesc : MemoryDescUtils::makeDummyDesc(*parentDesc);
-    memory::desc srcMemDesc = MemoryDescUtils::convertToDnnlMemoryDesc(definedParentDesc)->getDnnlDesc();
+    memory::desc srcMemDesc, dstMemDesc;
+    try {
+        auto definedParentDesc = parentDesc->isDefined() ? parentDesc : MemoryDescUtils::makeDummyDesc(*parentDesc);
+        memory::desc srcMemDesc = MemoryDescUtils::convertToDnnlMemoryDesc(definedParentDesc)->getDnnlDesc();
 
-    auto definedChildDesc = childDesc->isDefined() ? childDesc : MemoryDescUtils::makeDummyDesc(*childDesc);
-    memory::desc dstMemDesc = MemoryDescUtils::convertToDnnlMemoryDesc(definedChildDesc)->getDnnlDesc();
+        auto definedChildDesc = childDesc->isDefined() ? childDesc : MemoryDescUtils::makeDummyDesc(*childDesc);
+        memory::desc dstMemDesc = MemoryDescUtils::convertToDnnlMemoryDesc(definedChildDesc)->getDnnlDesc();
+    } catch (ov::Exception&) {
+        return false;
+    }
 
     dnnl::primitive_attr attr;
 
@@ -503,7 +510,7 @@ void Graph::InitEdges() {
         numberOfEdges--;
     };
 
-#if 0
+#if 1
     {
         static std::mutex _lock;
         std::lock_guard<std::mutex> guard(_lock);
@@ -591,7 +598,7 @@ void Graph::InitEdges() {
             updateEdge(i);
         }
     }
-#if 0
+#if 1
         {
         static std::mutex _lock;
         std::lock_guard<std::mutex> guard(_lock);
