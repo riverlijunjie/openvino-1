@@ -14,8 +14,7 @@ using namespace dnnl::impl::cpu;
 using namespace ov::intel_cpu;
 using namespace ov::intel_cpu::node;
 
-#define THROW_ERROR IE_THROW() << getTypeStr() << " node with name '" << getName() << "' "
-
+#define THROW_ERROR(...) OPENVINO_THROW(getTypeStr(), " node with name '", getName(), "' ", __VA_ARGS__)
 
 bool GridSample::isSupportedOperation(const std::shared_ptr<const ov::Node>& op, std::string& errorMessage) noexcept {
     try {
@@ -38,21 +37,21 @@ GridSample::GridSample(const std::shared_ptr<ov::Node>& op, const GraphContext::
     : Node(op, context, NgraphShapeInferFactory(op, PortMask(1))) {
     std::string errorMessage;
     if (!isSupportedOperation(op, errorMessage)) {
-        IE_THROW(NotImplemented) << errorMessage;
+        OPENVINO_THROW_NOT_IMPLEMENTED(errorMessage);
     }
 
     if (op->get_input_size() != 2 || op->get_output_size() != 1)
-        THROW_ERROR << "has incorrect number of input/output ports.";
+        THROW_ERROR("has incorrect number of input/output ports.");
 
     const auto& dataShape = getInputShapeAtPort(IN_DATA);
     if (dataShape.getRank() != 4)
-        THROW_ERROR << "has incorrect rank of the Data input.";
+        THROW_ERROR("has incorrect rank of the Data input.");
 
     const auto& gridShape = getInputShapeAtPort(IN_GRID);
     if (gridShape.getRank() != 4)
-        THROW_ERROR << "has incorrect rank of the Grid input.";
+        THROW_ERROR("has incorrect rank of the Grid input.");
     if (gridShape.isStatic() && gridShape.getDims()[3] != 2)
-        THROW_ERROR << "has incorrect shape of the Grid input. The 4th dimension should be equal to 2.";
+        THROW_ERROR("has incorrect shape of the Grid input. The 4th dimension should be equal to 2.");
 
     const auto& attributes = ov::as_type_ptr<ov::op::v9::GridSample>(op)->get_attributes();
     alignCorners = attributes.align_corners;
@@ -67,7 +66,7 @@ GridSample::GridSample(const std::shared_ptr<ov::Node>& op, const GraphContext::
             interpolationMode = GridSampleInterpolationMode::NEAREST;
             break;
         default:
-            THROW_ERROR << "supports only BILINEAR, BICUBIC, NEAREST interpolation modes.";
+            THROW_ERROR("supports only BILINEAR, BICUBIC, NEAREST interpolation modes.");
     }
     switch (attributes.padding_mode) {
         case op::v9::GridSample::PaddingMode::ZEROS:
@@ -80,7 +79,7 @@ GridSample::GridSample(const std::shared_ptr<ov::Node>& op, const GraphContext::
             paddingMode = GridSamplePaddingMode::REFLECTION;
             break;
         default:
-            THROW_ERROR << "supports only BORDER, REFLECTION, ZEROS paddings modes.";
+            THROW_ERROR("supports only BORDER, REFLECTION, ZEROS paddings modes.");
     }
 }
 
@@ -143,7 +142,7 @@ void GridSample::createPrimitive() {
     }
 #endif // OPENVINO_ARCH_X86_64
     if (!jitKernel) {
-        THROW_ERROR << " could not create JIT kernel.";
+        THROW_ERROR(" could not create JIT kernel.");
     }
     jitKernel->create_ker();
 
@@ -181,15 +180,15 @@ void GridSample::createPrimitive() {
 void GridSample::prepareParams() {
     auto dataMemPtr = getParentEdgeAt(IN_DATA)->getMemoryPtr();
     if (!dataMemPtr || !dataMemPtr->isAllocated())
-        THROW_ERROR << " has not allocated input data memory.";
+        THROW_ERROR(" has not allocated input data memory.");
     auto gridMemPtr = getParentEdgeAt(IN_GRID)->getMemoryPtr();
     if (!gridMemPtr || !gridMemPtr->isAllocated())
-        THROW_ERROR << " has not allocated input grid memory.";
+        THROW_ERROR(" has not allocated input grid memory.");
     auto dstMemPtr = getChildEdgeAt(0)->getMemoryPtr();
     if (!dstMemPtr || !dstMemPtr->isAllocated())
-        THROW_ERROR << " has not allocated output memory.";
+        THROW_ERROR(" has not allocated output memory.");
     if (getSelectedPrimitiveDescriptor() == nullptr)
-        THROW_ERROR << " has unidentified preferable primitive descriptor.";
+        THROW_ERROR(" has unidentified preferable primitive descriptor.");
 
     const uint64_t dataElPerVec = jitKernel->getDataElPerVec();
     const auto& srcDataShape = dataMemPtr->getStaticDims();

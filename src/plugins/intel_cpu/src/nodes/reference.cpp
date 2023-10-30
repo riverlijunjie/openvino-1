@@ -25,7 +25,8 @@ Reference::Reference(const std::shared_ptr<ngraph::Node>& op, const GraphContext
                                          const std::string& errorMessage) :
         Node(op, context, NgraphShapeInferFactory(op, FULL_PORT_MASK)), ngraphOp(op), additionalErrorMessage(errorMessage) {
     if (!op->has_evaluate()) {
-        IE_THROW(NotImplemented) << "Cannot fallback on ngraph reference implementation (Ngraph::Node::evaluate() is not implemented)";
+        OPENVINO_THROW_NOT_IMPLEMENTED(
+            "Cannot fallback on ngraph reference implementation (Ngraph::Node::evaluate() is not implemented");
     }
     setType(Type::Reference);
     setTypeStr("Reference");
@@ -65,7 +66,7 @@ void Reference::execute(dnnl::stream strm) {
     auto inputs = prepareInputs();
     auto outputs = prepareOutputs();
     if (!ngraphOp->evaluate(outputs, inputs)) {
-        IE_THROW() << "Evaluation failed on node of type: " << std::string(ngraphOp->get_type_name()) << " name: " << getName();
+        OPENVINO_THROW("Evaluation failed on node of type: ", std::string(ngraphOp->get_type_name()), " name: ", getName());
     }
 }
 
@@ -87,12 +88,13 @@ void Reference::executeDynamicImpl(dnnl::stream strm) {
             }
         }
     } else {
-         IE_THROW(Unexpected) <<
-            "Unexpected shape infer result status during the inference of a node with type " <<
-            getTypeStr() << " and name " << getName();
+        OPENVINO_THROW("Unexpected: Unexpected shape infer result status during the inference of a node with type ",
+                       getTypeStr(),
+                       " and name ",
+                       getName());
     }
     if (!ngraphOp->evaluate(outputs, inputs)) {
-        IE_THROW() << "Evaluation failed on node of type: " << std::string(ngraphOp->get_type_name()) << " name: " << getName();
+        OPENVINO_THROW("Evaluation failed on node of type: ", std::string(ngraphOp->get_type_name()), " name: ", getName());
     }
     if (ShapeInferStatus::skip == result.status) {
         std::vector<VectorDims> newOutputDims;
@@ -105,8 +107,13 @@ void Reference::executeDynamicImpl(dnnl::stream strm) {
             auto memory = getChildEdgesAtPort(i)[0]->getMemoryPtr();
             auto& tensor = outputs[i];
             if (memory->getSize() != tensor.get_byte_size()) {
-                IE_THROW(Unexpected) << "Output tensor data size mismatch occurred during the inference of a node with type " <<
-                getTypeStr() << " and name " << getName() << " on output port number " << i;
+                OPENVINO_THROW(
+                    "Unexpected: Output tensor data size mismatch occurred during the inference of a node with type ",
+                    getTypeStr(),
+                    " and name ",
+                    getName(),
+                    " on output port number ",
+                    i);
             }
             cpu_memcpy(memory->getData(), tensor.data(), tensor.get_byte_size());
         }

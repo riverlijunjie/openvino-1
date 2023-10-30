@@ -123,7 +123,7 @@ snippets::op::Subgraph::BlockedShapeVector getBlockedShapes(const std::vector<st
         const std::vector<std::vector<size_t>>& memOrders, const std::vector<InferenceEngine::Precision>& memPrecs) {
     size_t numShapes = memBlockedDims.size();
     if (memOrders.size() != numShapes || memPrecs.size() != numShapes)
-        IE_THROW(Unexpected) << "Number of shapes is mismacthed for dimensions, orders and precisions";
+        OPENVINO_THROW("Unexpected: Number of shapes is mismacthed for dimensions, orders and precisions");
     snippets::op::Subgraph::BlockedShapeVector blockedShapes(numShapes);
     for (size_t i = 0; i < numShapes; i++) {
         size_t dimSize = memBlockedDims[i].size();
@@ -148,7 +148,7 @@ Snippet::Snippet(const std::shared_ptr<ov::Node>& op, const GraphContext::CPtr& 
         dnnl::impl::cpu::x64::avx512_core : dnnl::impl::cpu::x64::avx2;
     original_snippet = ov::as_type_ptr<snippets::op::Subgraph>(op);
     if (!original_snippet) {
-        IE_THROW(NotImplemented) << "Node is not an instance of snippets::op::Subgraph";
+        OPENVINO_THROW_NOT_IMPLEMENTED("Node is not an instance of snippets::op::Subgraph");
     }
     init_body_hash();
     is_dynamic = isDynamicNgraphNode(op);
@@ -167,7 +167,7 @@ void Snippet::copy_snippet() const {
 #if defined(OPENVINO_ARCH_X86_64)
     snippetAttrs.snippet->set_generator(std::make_shared<CPUGenerator>(host_isa));
 #else
-    IE_THROW(NotImplemented) << "CPU plugin: code-generation is not supported on non-x64 platforms";
+    OPENVINO_THROW_NOT_IMPLEMENTED("CPU plugin: code-generation is not supported on non-x64 platforms");
 #endif // OPENVINO_ARCH_X86_64
 }
 
@@ -262,7 +262,7 @@ void Snippet::initSupportedPrimitiveDescriptors() {
                 static_cast<InferenceEngine::Precision>(InferenceEngine::Precision::BF16) :
                 originalInputPrecision;
             if (supportedPrecisions.count(precision) == 0)
-                IE_THROW() << "Subgraph node with name `" << getName() << "` doesn't support " << precision << " precision.";
+                OPENVINO_THROW("Subgraph node with name `", getName(), "` doesn't support ", precision, " precision.");
 
             const auto equalPrecisions = getOriginalOutputPrecisions().size() == 1 &&
                     precision == getOriginalOutputPrecisionAtPort(0);
@@ -281,7 +281,7 @@ void Snippet::initSupportedPrimitiveDescriptors() {
         for (size_t i = 0; i < outputShapes.size(); i++) {
             auto precision = getOriginalOutputPrecisionAtPort(i);
             if (supportedPrecisions.count(precision) == 0)
-                IE_THROW() << "Subgraph node with name `" << getName() << "` doesn't support " << precision << " precision.";
+                OPENVINO_THROW("Subgraph node with name `", getName(), "` doesn't support ", precision, " precision.");
 
             BlockedMemoryDesc::CmpMask outputMask = BlockedMemoryDesc::SKIP_OFFSET_MASK;
             PortConfig portConfig;
@@ -371,7 +371,7 @@ void Snippet::prepareParams() {
     auto result = cache->getOrCreate(key, builder);
     execPtr = result.first;
     if (!execPtr) {
-        IE_THROW() << "Executor is not created for node " << getName() << ".";
+        OPENVINO_THROW("Executor is not created for node ", getName(), ".");
     }
 }
 
@@ -411,7 +411,7 @@ bool Snippet::created() const {
 
 void Snippet::execute(dnnl::stream strm) {
     if (!execPtr) {
-        IE_THROW() << "Can't execute Subgraph node. Primitive didn't created";
+        OPENVINO_THROW("Can't execute Subgraph node. Primitive didn't created");
     }
     for (size_t i = 0; i < inputNum; i++)
         srcMemPtrs[i] = getParentEdgeAt(i)->getMemoryPtr();
@@ -427,7 +427,7 @@ void Snippet::executeDynamicImpl(dnnl::stream strm) {
 
 void Snippet::SnippetJitExecutor::exec(const std::vector<MemoryPtr>& inMemPtrs, const std::vector<MemoryPtr>& outMemPtrs) {
     if (schedule.ptr == nullptr) {
-        IE_THROW() << "Snippet can't use Optimized implementation and can't fallback to reference";
+        OPENVINO_THROW("Snippet can't use Optimized implementation and can't fallback to reference");
     }
     auto initStartMemoryOffsets = [this, &inMemPtrs, &outMemPtrs]() {
         for (size_t i = 0; i < numInput; i++) {
@@ -525,7 +525,7 @@ Snippet::SnippetJitExecutor::SnippetJitExecutor(const SnippetAttrs& attrs, bool 
                             : dnnl::impl::cpu::x64::avx2;
         snippet_for_generation->set_generator(std::make_shared<CPUGenerator>(host_isa));
 #else
-        IE_THROW(NotImplemented) << "CPU plugin: code-generation is not supported on non-x64 platforms";
+        OPENVINO_THROW_NOT_IMPLEMENTED("CPU plugin: code-generation is not supported on non-x64 platforms");
 #endif  // OPENVINO_ARCH_X86_64
     };
 
@@ -553,7 +553,7 @@ Snippet::SnippetJitExecutor::SnippetJitExecutor(const SnippetAttrs& attrs, bool 
     initDataSizes();
 
     if (canonicalShape.is_dynamic())
-        IE_THROW() << "Snippets: Canonicalization returned dynamic shape in static pipeline";
+        OPENVINO_THROW("Snippets: Canonicalization returned dynamic shape in static pipeline");
     snippet_for_generation->set_min_parallel_work_amount(static_cast<size_t>(parallel_get_max_threads()));
     // Note: minimal JIT work amount is a predefined value that describes the number of kernel iterations (work amount)
     // needed to cover kernel call overhead. It is used for balancing between parallel and JIT work amounts in domain optimization.

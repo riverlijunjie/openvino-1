@@ -32,20 +32,20 @@ CTCGreedyDecoder::CTCGreedyDecoder(const std::shared_ptr<ngraph::Node>& op, cons
     : Node(op, context, NgraphShapeInferFactory(op, EMPTY_PORT_MASK)) {
     std::string errorMessage;
     if (!isSupportedOperation(op, errorMessage)) {
-        IE_THROW(NotImplemented) << errorMessage;
+        OPENVINO_THROW_NOT_IMPLEMENTED(errorMessage);
     }
 
     errorPrefix = "CTCGreedyDecoder layer with name '" + op->get_friendly_name() + "' ";
     if (getOriginalInputsNumber() != 2)
-        IE_THROW() << errorPrefix << "has invalid number of input edges: " << getOriginalInputsNumber();
+        OPENVINO_THROW(errorPrefix, "has invalid number of input edges: ", getOriginalInputsNumber());
     if (getOriginalOutputsNumber() != 1)
-        IE_THROW() << errorPrefix << "has invalid number of outputs edges: " << getOriginalOutputsNumber();
+        OPENVINO_THROW(errorPrefix, "has invalid number of outputs edges: ", getOriginalOutputsNumber());
 
     const auto& dataDims = getInputShapeAtPort(DATA_INDEX).getDims();
     const auto& seqDims = getInputShapeAtPort(SEQUENCE_LENGTH_INDEX).getDims();
 
     if (!dimsEqualWeak(dataDims[0], seqDims[0]) || !dimsEqualWeak(dataDims[1], seqDims[1]))
-        IE_THROW() << errorPrefix << "has invalid input shapes.";
+        OPENVINO_THROW(errorPrefix, "has invalid input shapes.");
 
     auto greedyDecOp = ngraph::as_type_ptr<const ngraph::op::v0::CTCGreedyDecoder>(op);
     mergeRepeated = greedyDecOp->get_ctc_merge_repeated();
@@ -57,11 +57,11 @@ void CTCGreedyDecoder::initSupportedPrimitiveDescriptors() {
 
     Precision inDataPrecision = getOriginalInputPrecisionAtPort(DATA_INDEX);
     if (inDataPrecision != Precision::FP32 && inDataPrecision != Precision::BF16)
-        IE_THROW() << errorPrefix << "has unsupported 'data' input precision: " << inDataPrecision;
+        OPENVINO_THROW(errorPrefix, "has unsupported 'data' input precision: ", inDataPrecision);
 
     Precision seqLenPrecision = getOriginalInputPrecisionAtPort(SEQUENCE_LENGTH_INDEX);
     if (seqLenPrecision != Precision::FP32 && seqLenPrecision != Precision::BF16)
-        IE_THROW() << errorPrefix << "has unsupported 'sequence_length' input precision: " << seqLenPrecision;
+        OPENVINO_THROW(errorPrefix, "has unsupported 'sequence_length' input precision: ", seqLenPrecision);
 
     addSupportedPrimDesc({{LayoutType::ncsp, Precision::FP32},
                           {LayoutType::ncsp, Precision::FP32}},

@@ -163,7 +163,7 @@ size_t ov::intel_cpu::CPUTargetMachine::get_lanes() const {
         case dnnl::impl::cpu::x64::avx2 : return dnnl::impl::cpu::x64::cpu_isa_traits<dnnl::impl::cpu::x64::avx2>::vlen / sizeof(float);
         case dnnl::impl::cpu::x64::sse41 : return dnnl::impl::cpu::x64::cpu_isa_traits<dnnl::impl::cpu::x64::sse41>::vlen / sizeof(float);
         case dnnl::impl::cpu::x64::avx512_core : return dnnl::impl::cpu::x64::cpu_isa_traits<dnnl::impl::cpu::x64::avx512_core>::vlen / sizeof(float);
-        default : IE_THROW() << "unknown isa " << isa;
+        default : OPENVINO_THROW("unknown isa ", isa);
     }
 }
 
@@ -173,7 +173,7 @@ bool ov::intel_cpu::CPUTargetMachine::is_supported() const {
 
 ov::snippets::code ov::intel_cpu::CPUTargetMachine::get_snippet() const {
     if (h->create_kernel() != dnnl::impl::status::success) {
-        IE_THROW() << "Failed to create jit_kernel in get_snippet()";
+        OPENVINO_THROW("Failed to create jit_kernel in get_snippet()");
     }
     return h->jit_ker();
 }
