@@ -10,8 +10,8 @@
 #include <queue>
 
 #include "non_max_suppression.h"
-#include "ie_parallel.hpp"
-#include <ngraph/opsets/opset5.hpp>
+#include "openvino/core/parallel.hpp"
+#include <openvino/opsets/opset5.hpp>
 #include <ov_ops/nms_ie_internal.hpp>
 #include "utils/general_utils.h"
 
@@ -558,7 +558,7 @@ private:
 
 bool NonMaxSuppression::isSupportedOperation(const std::shared_ptr<const ov::Node>& op, std::string& errorMessage) noexcept {
     try {
-        using NonMaxSuppressionV9 = ngraph::op::v9::NonMaxSuppression;
+        using NonMaxSuppressionV9 = ov::op::v9::NonMaxSuppression;
         if (!one_of(op->get_type_info(), NonMaxSuppressionV9::get_type_info_static(),
                     ov::op::internal::NonMaxSuppressionIEInternal::get_type_info_static())) {
             errorMessage = "Only NonMaxSuppression v9 and NonMaxSuppressionIEInternal are supported";
@@ -596,7 +596,7 @@ NonMaxSuppression::NonMaxSuppression(const std::shared_ptr<ov::Node>& op, const 
     if (getOriginalOutputsNumber() != 3)
         OPENVINO_THROW(errorPrefix, "has incorrect number of output edges: ", getOriginalOutputsNumber());
 
-    if (const auto nms9 = std::dynamic_pointer_cast<const ngraph::op::v9::NonMaxSuppression>(op)) {
+    if (const auto nms9 = std::dynamic_pointer_cast<const ov::op::v9::NonMaxSuppression>(op)) {
         boxEncodingType = static_cast<NMSBoxEncodeType>(nms9->get_box_encoding());
         sortResultDescending = nms9->get_sort_result_descending();
         } else if (const auto nmsIe = std::dynamic_pointer_cast<const ov::op::internal::NonMaxSuppressionIEInternal>(op)) {

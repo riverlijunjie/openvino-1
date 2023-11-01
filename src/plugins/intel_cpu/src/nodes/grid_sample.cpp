@@ -6,8 +6,8 @@
 #include <vector>
 
 #include "grid_sample.hpp"
-#include "ie_parallel.hpp"
-#include <ngraph/opsets/opset1.hpp>
+#include "openvino/core/parallel.hpp"
+#include <openvino/opsets/opset1.hpp>
 
 using namespace InferenceEngine;
 using namespace dnnl::impl::cpu;
