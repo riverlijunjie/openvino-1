@@ -556,7 +556,7 @@ private:
 };
 #endif
 
-bool NonMaxSuppression::isSupportedOperation(const std::shared_ptr<const ngraph::Node>& op, std::string& errorMessage) noexcept {
+bool NonMaxSuppression::isSupportedOperation(const std::shared_ptr<const ov::Node>& op, std::string& errorMessage) noexcept {
     try {
         using NonMaxSuppressionV9 = ngraph::op::v9::NonMaxSuppression;
         if (!one_of(op->get_type_info(), NonMaxSuppressionV9::get_type_info_static(),
@@ -578,7 +578,7 @@ bool NonMaxSuppression::isSupportedOperation(const std::shared_ptr<const ngraph:
     return true;
 }
 
-NonMaxSuppression::NonMaxSuppression(const std::shared_ptr<ngraph::Node>& op, const GraphContext::CPtr context)
+NonMaxSuppression::NonMaxSuppression(const std::shared_ptr<ov::Node>& op, const GraphContext::CPtr context)
     : Node(op, context, InternalDynShapeInferFactory()),
       isSoftSuppressedByIOU(false) {
     std::string errorMessage;
