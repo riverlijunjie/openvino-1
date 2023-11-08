@@ -11,7 +11,6 @@
 #include "edge.h"
 #include "graph_context.h"
 #include "node.h"
-#include "normalize_preprocess.h"
 #include "openvino/runtime/make_tensor.hpp"
 #include "openvino/runtime/profiling_info.hpp"
 
@@ -56,10 +55,6 @@ public:
                      const std::vector<EdgePtr> &graphEdges,
                      const GraphContext::CPtr ctx,
                      std::string name);
-
-    bool hasMeanImageFor(const std::string& name) {
-        return _normalizePreprocMap.find(name) != _normalizePreprocMap.end();
-    }
 
     void PushInputData(const std::string& name, const ov::SoPtr<ITensor>& input);
     void PullOutputData(std::unordered_map<std::string, ov::SoPtr<ITensor>>& output);
@@ -205,7 +200,6 @@ protected:
         outputNodesMap.clear();
         graphNodes.clear();
         graphEdges.clear();
-        _normalizePreprocMap.clear();
         syncNodesInds.clear();
     }
     Status status { Status::NotReady };
@@ -221,7 +215,6 @@ protected:
     std::vector<NodePtr> graphNodes;
     std::vector<EdgePtr> graphEdges;
 
-    std::map<std::string, NormalizePreprocess> _normalizePreprocMap;
     std::string _name;
 
     bool graphHasDynamicInput = false;
