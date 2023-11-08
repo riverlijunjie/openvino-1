@@ -9,6 +9,7 @@
 #include "itt.h"
 #include "openvino/runtime/intel_cpu/properties.hpp"
 #include "openvino/runtime/internal_properties.hpp"
+
 #include "openvino/runtime/properties.hpp"
 #include "openvino/runtime/threading/cpu_streams_info.hpp"
 #include "openvino/runtime/threading/executor_manager.hpp"
@@ -28,12 +29,12 @@
 
 #include <cpu/x64/cpu_isa_traits.hpp>
 
-using namespace ov::threading;
-
 #if defined(OV_CPU_WITH_ACL)
 #include "nodes/executors/acl/acl_ie_scheduler.hpp"
 #include "arm_compute/runtime/CPP/CPPScheduler.h"
 #endif
+
+using namespace ov::threading;
 
 #define IE_CPU_PLUGIN_THROW(...) IE_THROW(__VA_ARGS__) << "CPU plugin: "
 
@@ -253,7 +254,6 @@ void Engine::apply_performance_hints(ov::AnyMap& config, const std::shared_ptr<o
                                ov::hint::num_requests.name(),
                                ". Expected only positive integer numbers");
             }
-
             if (val > 0)
                 streams_info.num_streams = std::min(streams_info.num_streams, val);
         } else if (engConfig.hintNumRequests > 0) {  // set thru SetConfig to the plugin, 2nd priority
@@ -262,6 +262,7 @@ void Engine::apply_performance_hints(ov::AnyMap& config, const std::shared_ptr<o
         return std::pair<std::string, StreamCfg>(std::to_string(streams_info.num_streams), streams_info);
     };
 
+    OPENVINO_SUPPRESS_DEPRECATED_START
     auto getPerfHintName = [&]() {
         const bool streamsExplicitlySetForModel = streamsSet(config);
         // checking streams (to avoid overriding what user might explicitly set in the incoming config or previously via
@@ -310,6 +311,7 @@ void Engine::apply_performance_hints(ov::AnyMap& config, const std::shared_ptr<o
             std::to_string(tput_hints.second.threads_per_stream_small);
         config[ov::internal::small_core_offset.name()] = std::to_string(tput_hints.second.small_core_offset);
     }
+    OPENVINO_SUPPRESS_DEPRECATED_END
 }
 
 void Engine::get_performance_streams(Config& config, const std::shared_ptr<ov::Model>& model) const{
@@ -325,7 +327,9 @@ void Engine::get_performance_streams(Config& config, const std::shared_ptr<ov::M
         streams = config.streamExecutorConfig._streams == 1 ? 0 : config.streamExecutorConfig._streams;
     }
 
-    get_num_streams(streams, model, config);
+    if (!((0 == config.streamExecutorConfig._streams) && config.streamExecutorConfig._streams_changed)) {
+        get_num_streams(streams, model, config);
+    }
 
     OPENVINO_SUPPRESS_DEPRECATED_START
     config._config[CONFIG_KEY(CPU_THROUGHPUT_STREAMS)] = std::to_string(config.streamExecutorConfig._streams);
@@ -499,6 +503,8 @@ static Config::SnippetsMode getSnippetsMode(const ov::AnyMap& modelConfig, const
         return Config::SnippetsMode::IgnoreCallback;
     else if (val == ov::util::to_string(ov::SnippetsMode::DISABLE))
         return Config::SnippetsMode::Disable;
+    else if (val == ov::util::to_string(ov::SnippetsMode::ENABLE))
+        return Config::SnippetsMode::Enable;
     else
         OPENVINO_THROW("Wrong value for property key SNIPPETS_MODE. Expected values: ENABLE/DISABLE/IGNORE_CALLBACK");
 }
@@ -539,16 +545,18 @@ Engine::compile_model(const std::shared_ptr<const ov::Model>& model, const ov::A
     const Config::SnippetsMode snippetsMode = getSnippetsMode(config, engConfig);
     DEBUG_LOG(PrintableModel(*cloned_model, "org_"));
 
-    Transformations transformations(cloned_model, enableLPT, inferencePrecision, is_legacy_api(), snippetsMode, engConfig);
+    // update the props after the perf mode translated to configs
+    // TODO: Clarify the behavior of SetConfig method. Skip eng_config or not?
+    Config conf = engConfig;
+
+    Transformations transformations(cloned_model, enableLPT, inferencePrecision, is_legacy_api(), snippetsMode, conf);
+
     transformations.UpToLpt();
 
     if (!is_cpu_map_available()) {
         apply_performance_hints(config, cloned_model);
     }
 
-    // update the props after the perf mode translated to configs
-    // TODO: Clarify the behavior of SetConfig method. Skip eng_config or not?
-    Config conf = engConfig;
     conf.readProperties(config, modelType);
     calculate_streams(conf, cloned_model);
 
