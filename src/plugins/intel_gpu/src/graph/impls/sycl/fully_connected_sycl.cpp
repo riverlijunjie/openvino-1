@@ -57,7 +57,7 @@ template<typename AType, typename WType, typename ZPType, typename ScaleType, ty
     bool has_value = dzp_s.has_value();
     float dzp_value = dzp_s.value_or(0.0f);
     return queue.submit([=](::sycl::handler& cgh) {
-        cgh.parallel_for(::sycl::range<3>(out_shape[0], out_shape[1], out_shape[2]), [=](::sycl::id<3> index) {
+        cgh.parallel_for(::sycl::range<3>(1, out_shape[0], out_shape[1]), [=](::sycl::id<3> index) {
             const uint b = index[0];
             const uint m = index[1];
             const uint n = index[2];
@@ -149,7 +149,7 @@ public:
     event::ptr execute_impl(const std::vector<event::ptr>& /* events */, typed_primitive_inst<fully_connected>& instance) override {
         auto& network = instance.get_network();
         const auto& desc = instance.get_typed_desc<fully_connected>();
-        const bool print = false;
+        const bool print = true;
 
         auto start = std::chrono::high_resolution_clock::now();
         auto& stream = dynamic_cast<ocl::ocl_stream&>(network.get_stream());
@@ -184,9 +184,9 @@ public:
         ov::element::Type_t ds_t = params->input_layouts[2].data_type;
         ov::element::Type_t dzp_t = inputs.size() == 3 ? params->input_layouts[3].data_type : ov::element::Type_t::undefined;
 
-        OPENVINO_ASSERT(out_shape.size() == 3);
-        size_t M = out_shape[1];
-        size_t N = out_shape[2];
+        OPENVINO_ASSERT(out_shape.size() == 3 || out_shape.size() == 2);
+        size_t M = out_shape.size() == 3 ? out_shape[1] : out_shape[0];
+        size_t N = out_shape.size() == 3 ? out_shape[2] : out_shape[1];
         size_t K = params->weights_layout.value().get_partial_shape()[1].get_length();
         size_t groups_num = params->input_layouts[2].get_shape()[1];
         size_t group_size = K / groups_num;
@@ -225,6 +225,8 @@ public:
 
         OPENVINO_ASSERT(inputs.size() >= 2);
 
+        event::ptr ret_event;
+
         auto dzp_scalar = desc->decompression_zero_point_scalar;
 
         #define CASE(InputType, WeightsType, ZPType, ScaleType, DstType) \
@@ -241,7 +243,7 @@ public:
             const float* ds = static_cast<const float*>(inputs[1]->buffer_ptr());
             const float* dzp = inputs.size() == 3 ? static_cast<const float*>(inputs[2]->buffer_ptr()) : nullptr;
 
-            return to_ocl_event(stream, run_fc_int4_woq(sycl_queue, in, wei, dzp, ds, out, M, N, K, group_size, groups_num, out_shape, dzp_scalar));
+            ret_event = to_ocl_event(stream, run_fc_int4_woq(sycl_queue, in, wei, dzp, ds, out, M, N, K, group_size, groups_num, out_shape, dzp_scalar));
         } else if ((CASE(f16, u4, f16, f16, f16)) || (CASE(f16, u4, undefined, f16, f16))) {
             const ::sycl::half* in = static_cast<const ::sycl::half*>(inputs[0]->buffer_ptr());
             const uint8_t* wei = static_cast<const uint8_t*>(weights->buffer_ptr());
@@ -250,7 +252,7 @@ public:
             const ::sycl::half* dzp = inputs.size() == 3 ? static_cast<const ::sycl::half*>(inputs[2]->buffer_ptr()) : nullptr;
 
 
-            return to_ocl_event(stream, run_fc_int4_woq(sycl_queue, in, wei, dzp, ds, out, M, N, K, group_size, groups_num, out_shape, dzp_scalar));
+            ret_event = to_ocl_event(stream, run_fc_int4_woq(sycl_queue, in, wei, dzp, ds, out, M, N, K, group_size, groups_num, out_shape, dzp_scalar));
         } else if ((CASE(f16, u4, f16, f16, f32)) || (CASE(f16, u4, undefined, f16, f32))) {
             const ::sycl::half* in = static_cast<const ::sycl::half*>(inputs[0]->buffer_ptr());
             const uint8_t* wei = static_cast<const uint8_t*>(weights->buffer_ptr());
@@ -259,7 +261,7 @@ public:
             const ::sycl::half* dzp = inputs.size() == 3 ? static_cast<const ::sycl::half*>(inputs[2]->buffer_ptr()) : nullptr;
 
 
-            return to_ocl_event(stream, run_fc_int4_woq(sycl_queue, in, wei, dzp, ds, out, M, N, K, group_size, groups_num, out_shape, dzp_scalar));
+            ret_event = to_ocl_event(stream, run_fc_int4_woq(sycl_queue, in, wei, dzp, ds, out, M, N, K, group_size, groups_num, out_shape, dzp_scalar));
         } else if ((CASE(f32, u8, f32, f32, f32)) || (CASE(f32, u8, undefined, f32, f32))) {
             const float* in = static_cast<const float*>(inputs[0]->buffer_ptr());
             const uint8_t* wei = static_cast<const uint8_t*>(weights->buffer_ptr());
@@ -267,7 +269,7 @@ public:
             const float* ds = static_cast<const float*>(inputs[1]->buffer_ptr());
             const float* dzp = inputs.size() == 3 ? static_cast<const float*>(inputs[2]->buffer_ptr()) : nullptr;
 
-            return to_ocl_event(stream, run_fc_int8_woq(sycl_queue, in, wei, dzp, ds, out, M, N, K, group_size, groups_num, out_shape, dzp_scalar));
+            ret_event = to_ocl_event(stream, run_fc_int8_woq(sycl_queue, in, wei, dzp, ds, out, M, N, K, group_size, groups_num, out_shape, dzp_scalar));
         } else if ((CASE(f16, u8, f16, f16, f16)) || (CASE(f16, u8, undefined, f16, f16))) {
             const ::sycl::half* in = static_cast<const ::sycl::half*>(inputs[0]->buffer_ptr());
             const uint8_t* wei = static_cast<const uint8_t*>(weights->buffer_ptr());
@@ -275,7 +277,7 @@ public:
             const ::sycl::half* ds = static_cast<const ::sycl::half*>(inputs[1]->buffer_ptr());
             const ::sycl::half* dzp = inputs.size() == 3 ? static_cast<const ::sycl::half*>(inputs[2]->buffer_ptr()) : nullptr;
 
-            return to_ocl_event(stream, run_fc_int8_woq(sycl_queue, in, wei, dzp, ds, out, M, N, K, group_size, groups_num, out_shape, dzp_scalar));
+            ret_event = to_ocl_event(stream, run_fc_int8_woq(sycl_queue, in, wei, dzp, ds, out, M, N, K, group_size, groups_num, out_shape, dzp_scalar));
         } else if ((CASE(f16, u8, f16, f16, f32)) || (CASE(f16, u8, undefined, f16, f32))) {
             const ::sycl::half* in = static_cast<const ::sycl::half*>(inputs[0]->buffer_ptr());
             const uint8_t* wei = static_cast<const uint8_t*>(weights->buffer_ptr());
@@ -283,10 +285,12 @@ public:
             const ::sycl::half* ds = static_cast<const ::sycl::half*>(inputs[1]->buffer_ptr());
             const ::sycl::half* dzp = inputs.size() == 3 ? static_cast<const ::sycl::half*>(inputs[2]->buffer_ptr()) : nullptr;
 
-            return to_ocl_event(stream, run_fc_int8_woq(sycl_queue, in, wei, dzp, ds, out, M, N, K, group_size, groups_num, out_shape, dzp_scalar));
+            ret_event = to_ocl_event(stream, run_fc_int8_woq(sycl_queue, in, wei, dzp, ds, out, M, N, K, group_size, groups_num, out_shape, dzp_scalar));
         } else {
             OPENVINO_THROW("No instance for given types found");
         }
+
+        return ret_event;
     }
 
     static std::shared_ptr<WeightsReorderParams> get_weights_reorder(const kernel_impl_params& impl_params) {

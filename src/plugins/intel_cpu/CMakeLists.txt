@@ -30,6 +30,8 @@ elseif(OV_COMPILER_IS_CLANG)
     endif()
 endif()
 
+ov_add_compiler_flags(-mavx -mavx2 -mavx512f -msse -mavx512vl -mavx512bw)
+
 set(OV_CPU_ARM_TARGET_GENERIC_ARCHS armv8a
                                     armv8.2-a
                                     armv8.6-a armv8.6-a-sve armv8.6-a-sve2 armv8.6-a-sve2-sme2

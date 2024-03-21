@@ -35,10 +35,7 @@ struct typed_primitive_sycl_impl : public typed_primitive_impl<PType> {
         : typed_primitive_impl<PType>(weights_reorder, "sycl_kernel"),
         _engine(&engine) { }
 
-    typed_primitive_sycl_impl()
-        : typed_primitive_impl<PType>({}, "undef"),
-          _engine(nullptr){
-    }
+    typed_primitive_sycl_impl() : typed_primitive_impl<PType>({}, "undef"), _engine(nullptr) {}
 
     bool is_cpu() const override { return false; }
     bool is_onednn() const override { return false; }
@@ -50,8 +47,7 @@ struct typed_primitive_sycl_impl : public typed_primitive_impl<PType> {
     }
 
 protected:
-
-    void init_kernels(const kernels_cache&, const kernel_impl_params&) override { }
+    void init_kernels(const kernels_cache&, const kernel_impl_params&) override {}
 
     void set_arguments_impl(typed_primitive_inst<PType>& instance) override {
         if (instance.can_be_optimized())
