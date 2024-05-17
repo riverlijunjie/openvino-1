@@ -39,6 +39,12 @@ Graph::Graph(std::shared_ptr<ov::Model> model, const RemoteContextImpl::Ptr& con
     : m_context(context)
     , m_config(config)
     , m_stream_id(stream_id) {
+#ifdef ENABLE_ONEDNN_FOR_GPU
+    if (get_engine().get_device_info().dev_type == cldnn::device_type::integrated_gpu) {
+        get_engine().create_onednn_engine(config);
+    }
+#endif
+
     auto program_builder = std::make_shared<ProgramBuilder>(model, get_engine(), config, false);
     m_config = program_builder->get_config();
 

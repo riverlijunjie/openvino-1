@@ -1584,8 +1584,8 @@ impl_types layout_optimizer::get_preferred_impl_type(program_node& node, format 
             }
         }
     } else if (node.is_type<reorder>()) {
-        if (!_optimization_attributes.use_onednn_impls)
-            return impl_types::ocl;
+        // if (!_optimization_attributes.use_onednn_impls)
+        //    return impl_types::ocl;
 
         std::vector<format> onednn_optimized_fmt = {
             format::bfyx,
@@ -1742,8 +1742,8 @@ impl_types layout_optimizer::get_preferred_impl_type(program_node& node, format 
         }
     // TODO: uncomment this code when onednn gemm implementations will have real perf improvements vs cldnn
     } else if (node.is_type<fully_connected>() || node.is_type<gemm>()) {
-        if (!_optimization_attributes.use_onednn_impls)
-            return impl_types::ocl;
+        // if (!_optimization_attributes.use_onednn_impls)
+        //    return impl_types::ocl;
 
         impl_types impl_candidate = impl_types::onednn;
 
