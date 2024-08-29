@@ -21,6 +21,9 @@ public:
         std::shared_ptr<void> buf;
         bool flag;
         bool last_used;
+        std::shared_ptr<cldnn::stream> stream_ptr;
+        std::vector<cldnn::memory::ptr> recv_bufs; // todo: avoid mem copy
+        std::vector<uint64_t> remote_fd; // remote handle for map back
     };
 
     SubMemoryManager(int num_sub_streams) {
@@ -29,6 +32,7 @@ public:
         MemoryInfo memory_info;
         memory_info.flag = false;
         memory_info.last_used = false;
+        memory_info.remote_fd.assign(2, 0);
         std::vector<MemoryInfo> memorys;
         memorys.assign(_num_sub_streams, memory_info);
         _memorys_table.assign(2, memorys);

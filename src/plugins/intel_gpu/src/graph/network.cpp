@@ -415,6 +415,12 @@ network::network(program::ptr program, const ExecutionConfig& config, stream::pt
     build_exec_order();
     validate_primitives();
     add_default_output_chains();
+
+    if (_sub_memory_manager) {
+        auto id = get_program()->get_config().subStreamExecConfig.get_rank()[0];
+        _sub_memory_manager->_memorys_table[0][id].stream_ptr = _stream;
+        _sub_memory_manager->_memorys_table[1][id].stream_ptr = _stream;
+    }
 }
 
 network::network(engine& engine,
