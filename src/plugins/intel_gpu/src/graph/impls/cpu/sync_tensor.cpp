@@ -307,29 +307,19 @@ public:
         clFinish(queue);
     }
 
-    event::ptr remote_copy(cldnn::stream& stream, cl_mem src, cl_mem dst, size_t size) {
+    cl_event remote_copy(cldnn::stream& stream, cl_mem src, cl_mem dst, size_t size) {
         const auto start = perf_dump_start();
         auto& ocl_stream = downcast<ocl::ocl_stream>(stream);
         auto queue = ocl_stream.get_cl_queue().get();
-        // auto usr_event = ocl_stream.create_user_event(false);
-        // cl_event& ret = std::dynamic_pointer_cast<ocl::ocl_event>(usr_event)->get().get();
         cl_event ret;
-        clFlush(queue);
-        clFinish(queue);
         clEnqueueCopyBuffer(queue, src, dst, 0, 0, size, 0, NULL, &ret);
-        // auto event = ocl_stream.create_event(cl::Event(ret));
-        // clFlush(queue);
         clWaitForEvents(1, &ret);
-        clFinish(queue);
-        //clReleaseEvent(ret);
         perf_dump_done(start, std::string("p2p copy host time for ") + std::to_string(size) + std::string(" bytes"), true);
-        // return usr_event;
-        // return ocl_stream.create_event(cl::Event(ret));
-        return stream.create_user_event(true);
+        return ret;
     }
 
-    void set_remote_sync(cldnn::stream& stream, cl_mem remote_cl_buf, int offset, int value) {
-        return;
+    cl_event set_remote_sync(cldnn::stream& stream, cl_event event, cl_mem remote_cl_buf, int offset, int value) {
+        return nullptr;
         cl_int err;
         const auto start = perf_dump_start();
         auto& ocl_stream = downcast<ocl::ocl_stream>(stream);
@@ -385,16 +375,17 @@ public:
 
         size_t global_size[] = {1};
         auto queue = ocl_stream.get_cl_queue().get();
-        err = clEnqueueNDRangeKernel(queue, sync_kernel, 1, nullptr, global_size, nullptr, 0, nullptr, nullptr);
+        cl_event ret = nullptr;
+        err = clEnqueueNDRangeKernel(queue, sync_kernel, 1, nullptr, global_size, nullptr, 1, &event, &ret);
         CHECK_OCL_ERROR_EXIT(err, "clEnqueueNDRangeKernel failed");
         clFinish(queue);  // todo: opt performance by removing clFinish
 
         perf_dump_done(start, std::string("ocl p2p set_sync time"));
-        return;
+        return ret;
     }
 
-    void wait_remote_sync(cldnn::stream& stream, cl_mem local_cl_buf, int offset) {
-        return;
+    cl_event wait_remote_sync(cldnn::stream& stream, cl_mem local_cl_buf, int offset) {
+        return nullptr;
         cl_int err;
         const auto start = perf_dump_start();
         auto& ocl_stream = downcast<ocl::ocl_stream>(stream);
@@ -450,12 +441,13 @@ public:
 
         size_t global_size[] = {1};
         auto queue = ocl_stream.get_cl_queue().get();
-        err = clEnqueueNDRangeKernel(queue, wait_kernel, 1, nullptr, global_size, nullptr, 0, nullptr, nullptr);
+        cl_event event = nullptr;
+        err = clEnqueueNDRangeKernel(queue, wait_kernel, 1, nullptr, global_size, nullptr, 0, nullptr, &event);
         CHECK_OCL_ERROR_EXIT(err, "clEnqueueNDRangeKernel failed");
-        clFinish(queue);  // todo: opt performance by removing clFinish
+        // clFinish(queue);  // todo: opt performance by removing clFinish
 
         perf_dump_done(start, std::string("ocl p2p wait_sync time"));
-        return;
+        return event;
     }
 
 private:
@@ -605,6 +597,7 @@ public:
     }
 
     event::ptr tensor_add(cldnn::stream& stream,
+                          std::vector<cl_event>& events,
                           cl_mem src,
                           cl_mem dst,
                           size_t element_count,
@@ -612,9 +605,7 @@ public:
         cl_int err;
         auto& ocl_stream = downcast<ocl::ocl_stream>(stream);
         const auto start = perf_dump_start();
-
         cl_kernel kernel = get_or_create_kernel_if_possible(stream, data_type);
-
         perf_dump_done(start, std::string("get_or_create_kernel_if_possible"), false);
 
         err = clSetKernelArg(kernel, 0, sizeof(cl_mem), &src);
@@ -622,25 +613,25 @@ public:
 
         err = clSetKernelArg(kernel, 1, sizeof(cl_mem), &dst);
         CHECK_OCL_ERROR_EXIT(err, "clSetKernelArg dst failed");
-
         perf_dump_done(start, std::string("tensor_add->clSetKernelArg"), false);
 
         size_t global_size[] = {element_count};
         auto queue = ocl_stream.get_cl_queue().get();
-        // auto wait_event = std::dynamic_pointer_cast<ocl::ocl_event>(event)->get().get();
-        // auto usr_event = ocl_stream.create_user_event(false);
-        // cl_event ret = std::dynamic_pointer_cast<ocl::ocl_event>(usr_event)->get().get();
         cl_event ret;
-
-        err = clEnqueueNDRangeKernel(queue, kernel, 1, nullptr, global_size, nullptr, 0, nullptr, &ret);
+        err = clEnqueueNDRangeKernel(queue,
+                                     kernel,
+                                     1,
+                                     nullptr,
+                                     global_size,
+                                     nullptr,
+                                     events.size(),
+                                     events.size() > 0 ? events.data() : nullptr,
+                                     &ret);
         CHECK_OCL_ERROR_EXIT(err, "clEnqueueNDRangeKernel failed");
-        // clFinish(queue);
-        clWaitForEvents(1, &ret);
+        // clWaitForEvents(1, &ret);
 
         perf_dump_done(start, std::string("tensor add host time"), false);
         return ocl_stream.create_event(cl::Event(ret));
-        // return usr_event;
-        // return stream.create_user_event(true);
     }
 
     void finish(cldnn::stream& stream) {
@@ -733,6 +724,7 @@ public:
     }
 
     std::vector<cldnn::event::ptr> concat(cldnn::stream& stream,
+                                          std::vector<cl_event>& events,
                                           std::vector<std::shared_ptr<concat_mem>>& src,
                                           std::shared_ptr<concat_mem>& dst) {
         const auto start = perf_dump_start();
@@ -749,9 +741,6 @@ public:
         size_t src_rec[3] = {0, 0, 0};
         size_t dst_rec[3] = {0, 0, 0};
         std::vector<cldnn::event::ptr> sync_events;
-        // clEnqueueBarrier(queue);
-        clFlush(queue);
-        clFinish(queue);
         if (concat_mode == 0) {
             // Vertical concat
             cl_event event;
@@ -767,20 +756,18 @@ public:
                                                    src[i]->height * src[i]->stride,
                                                    dst->stride,
                                                    dst->stride * dst->width,
-                                                   0,
-                                                   nullptr,
+                                                   events.size(),
+                                                   events.size() > 0 ? events.data() : nullptr,
                                                    &event);
                 if (ret != CL_SUCCESS) {
                     std::cout << "0.clEnqueueCopyBufferRect failed: " << oclErrorCode[ret] << ", idx = " << i
                               << std::endl;
                 }
                 dst_rec[1] += src[i]->height;
-                clFlush(queue);
-                ret = clWaitForEvents(1, &event);
-                CHECK_OCL_ERROR(ret, "clWaitForEvents failed");
-                clFinish(queue);
-                clReleaseEvent(event);
-                // sync_events.emplace_back(ocl_stream.create_event(cl::Event(event)));
+                //ret = clWaitForEvents(1, &event);
+                //CHECK_OCL_ERROR(ret, "clWaitForEvents failed");
+                //clReleaseEvent(event);
+                sync_events.emplace_back(ocl_stream.create_event(cl::Event(event)));
             }
         } else if (concat_mode == 1) {
             // Horizontal concat
@@ -797,21 +784,18 @@ public:
                                                    src[i]->height * src[i]->stride,
                                                    dst->stride,
                                                    dst->stride * dst->width,
-                                                   0,
-                                                   nullptr,
+                                                   0/*events.size()*/,
+                                                   nullptr/*&events[0]*/,
                                                    &event);
                 if (ret != CL_SUCCESS) {
                     std::cout << "1.clEnqueueCopyBufferRect failed: " << oclErrorCode[ret] << ", idx = " << i
                               << std::endl;
                 }
                 dst_rec[0] += src[i]->width;
-                clFlush(queue);
-                ret = clWaitForEvents(1, &event);
-                CHECK_OCL_ERROR(ret, "clWaitForEvents failed");
-                clFinish(queue);
-                clReleaseEvent(event);
-                // std::this_thread::sleep_for(std::chrono::milliseconds(50));
-                // sync_events.emplace_back(ocl_stream.create_event(cl::Event(event)));
+                //ret = clWaitForEvents(1, &event);
+                //CHECK_OCL_ERROR(ret, "clWaitForEvents failed");
+                //clReleaseEvent(event);
+                sync_events.emplace_back(ocl_stream.create_event(cl::Event(event)));
             }
         } else {
             std::cout << "ocl_concat failed: incorrect concat mode!" << std::endl;
@@ -884,17 +868,36 @@ struct sync_tensor_impl : public typed_primitive_impl<sync_tensor> {
         parent::load(ib);
     }
 
-    void wait_p2p_done(cldnn::stream& stream,
-                       cldnn::cpu::ocl_p2p_helper& p2p_helper,
-                       ov::intel_gpu::SubMemoryManager::ptr& sub_mem_mgr,
-                       int id,
-                       size_t w_size,
-                       int32_t w_rank,
-                       bool validate = true) {
+    std::vector<cl_event> wait_p2p_done_opt(cldnn::stream& stream,
+                                            cldnn::cpu::ocl_p2p_helper& p2p_helper,
+                                            ov::intel_gpu::SubMemoryManager::ptr& sub_mem_mgr,
+                                            int id,
+                                            size_t w_size,
+                                            int32_t w_rank) {
+        std::vector<cl_event> events;
+        auto sync_buf = sub_mem_mgr->_memorys_table[id][w_rank].sync_buf;
+        for (size_t idx = 0; idx < w_size; idx++) {
+            if (idx != static_cast<size_t>(w_rank)) {
+                auto ret = p2p_helper.wait_remote_sync(stream, static_cast<cl_mem>(sync_buf), idx);
+                if (ret != nullptr)
+                    events.emplace_back(ret);
+            }
+        }
+        return events;
+    }
+
+    std::vector<cl_event> wait_p2p_done(cldnn::stream& stream,
+                                        cldnn::cpu::ocl_p2p_helper& p2p_helper,
+                                        ov::intel_gpu::SubMemoryManager::ptr& sub_mem_mgr,
+                                        int id,
+                                        size_t w_size,
+                                        int32_t w_rank,
+                                        bool validate = true) {
         // Wait for P2P transferred data are ready
         std::vector<int> copy_list(w_size, 1);
         copy_list[w_rank] = 0;
         auto start = perf_dump_start();
+        std::vector<cl_event> wait_events;
 
         // Dump P2P 16 bytes source data
         const size_t check_size = 16;
@@ -927,7 +930,9 @@ struct sync_tensor_impl : public typed_primitive_impl<sync_tensor> {
                     auto event = sub_mem_mgr->_memorys_table[id][w_rank].events[idx];
                     if (event) {
                         auto sync_buf = sub_mem_mgr->_memorys_table[id][w_rank].sync_buf;
-                        p2p_helper.wait_remote_sync(stream, static_cast<cl_mem>(sync_buf), idx);
+                        auto ret_event = p2p_helper.wait_remote_sync(stream, static_cast<cl_mem>(sync_buf), idx);
+                        if (ret_event != nullptr)
+                            wait_events.emplace_back(ret_event);
 
                         event->wait();
                         remote_ocl_stream.finish();
@@ -989,12 +994,10 @@ struct sync_tensor_impl : public typed_primitive_impl<sync_tensor> {
                 dst_data[idx] = nullptr;
             }
         }
-
-        // std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        // std::this_thread::sleep_for(std::chrono::microseconds(100));
         perf_dump_done(start,
                        std::string("rank[") + std::to_string(w_rank) + std::string("] sync_tensor wait p2p done"),
                        true);
+        return wait_events;
     }
 
     std::vector<cldnn::event::ptr> propagate_p2p_events(ov::intel_gpu::SubMemoryManager::ptr& sub_mem_mgr,
@@ -1033,7 +1036,6 @@ struct sync_tensor_impl : public typed_primitive_impl<sync_tensor> {
         OV_ITT_SCOPED_TASK(ov::intel_gpu::itt::domains::intel_gpu_plugin, "sync_tensor::execute_impl");
         auto& stream = instance.get_network().get_stream();
         const bool pass_through_events = false;
-        //    (stream.get_queue_type() == QueueTypes::out_of_order) && instance.get_node().is_in_shape_of_subgraph();
 
         auto w_rank = instance.get_network().get_program()->get_config().subStreamExecConfig.get_rank()[0];
         auto w_size = instance.get_network().get_program()->get_config().get_context_for_tp().size();
@@ -1122,7 +1124,7 @@ struct sync_tensor_impl : public typed_primitive_impl<sync_tensor> {
 
                     data_size = dst_mem->size();
                     auto dst_cl_buf = p2p_helper.map_remote_mem(local_context, dst_cl_buf_remote, data_size);
-                    sync_event = p2p_helper.remote_copy(stream, src_cl_buf, dst_cl_buf, data_size);
+                    auto cl_event = p2p_helper.remote_copy(stream, src_cl_buf, dst_cl_buf, data_size);
                     {
                         std::lock_guard<std::mutex> lock(sub_mem_mgr->_flagMutex);
                         if (sub_mem_mgr->_memorys_table[id][idx].sync_buf == nullptr) {
@@ -1136,10 +1138,10 @@ struct sync_tensor_impl : public typed_primitive_impl<sync_tensor> {
                         }
                     }
                     auto remote_sync_buf = sub_mem_mgr->_memorys_table[id][idx].sync_buf;
-                    p2p_helper.set_remote_sync(stream, static_cast<cl_mem>(remote_sync_buf), w_rank, 1);
+                    auto sync_event = p2p_helper.set_remote_sync(stream, cl_event, static_cast<cl_mem>(remote_sync_buf), w_rank, 1);
                     {
                         std::lock_guard<std::mutex> lock(sub_mem_mgr->_flagMutex);
-                        sub_mem_mgr->_memorys_table[id][idx].events[w_rank] = sync_event;
+                        sub_mem_mgr->_memorys_table[id][idx].events[w_rank] = ocl_stream.create_event(cl::Event(sync_event));;
                     }
 
                     if (0) { // validate p2p result
@@ -1213,7 +1215,8 @@ struct sync_tensor_impl : public typed_primitive_impl<sync_tensor> {
         }
 
         // P2P adopts sync write to avoid the problem of event cannot work across contexts
-        wait_p2p_done(stream, p2p_helper, sub_mem_mgr, id, w_size, w_rank, false);
+        auto p2p_events = wait_p2p_done(stream, p2p_helper, sub_mem_mgr, id, w_size, w_rank, false);
+        // auto p2p_events = wait_p2p_done_opt(stream, p2p_helper, sub_mem_mgr, id, w_size, w_rank);
 
         std::vector<cldnn::event::ptr> sync_events;
         if (is_all_reduce) {
@@ -1229,6 +1232,7 @@ struct sync_tensor_impl : public typed_primitive_impl<sync_tensor> {
                                           .get();
                     sync_event = get_adder_instance(w_rank).tensor_add(
                         stream,
+                        p2p_events,
                         src_cl_buf,
                         dst_cl_buf,
                         dst_mem->count(),
@@ -1249,8 +1253,6 @@ struct sync_tensor_impl : public typed_primitive_impl<sync_tensor> {
         } else {
             // All_gather path
             // concat process
-            // auto dst_mem = std::dynamic_pointer_cast<const ocl::gpu_buffer>(instance.output_memory_ptr(w_size));
-            // auto type = dst_mem->get_layout().data_type;
             auto concat = std::make_shared<simple_ocl_concat>();
             std::vector<std::shared_ptr<concat_mem>> src_mem;
             std::shared_ptr<concat_mem> dst_mem;
@@ -1289,7 +1291,7 @@ struct sync_tensor_impl : public typed_primitive_impl<sync_tensor> {
                 std::lock_guard<std::mutex> lock(debug_mutex);
                 concat->print(src_mem, dst_mem);
             }
-            sync_events = concat->concat(stream, src_mem, dst_mem);
+            sync_events = concat->concat(stream, p2p_events, src_mem, dst_mem);
             if (0) {
                 std::lock_guard<std::mutex> lock(debug_mutex);
                 std::cout << "tensor_sync concat: rank[" << w_rank << "] done" << std::endl;
@@ -1393,11 +1395,11 @@ struct sync_tensor_impl : public typed_primitive_impl<sync_tensor> {
             sub_mem_mgr->_use_count[id]++;
         }
 
-        while (true) {
-            std::lock_guard<std::mutex> lock(sub_mem_mgr->_flagMutex);
-            if (sub_mem_mgr->_use_count[id] == w_size)
-                break;
-        }
+        //while (true) {
+        //    std::lock_guard<std::mutex> lock(sub_mem_mgr->_flagMutex);
+        //    if (sub_mem_mgr->_use_count[id] == w_size)
+        //        break;
+        //}
 
         // return stream.create_user_event(true);
         return sync_events.size() > 0 ? stream.group_events(sync_events) : stream.create_user_event(true);
