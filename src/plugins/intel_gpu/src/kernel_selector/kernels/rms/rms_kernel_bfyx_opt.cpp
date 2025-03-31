@@ -87,6 +87,7 @@ JitConstants RMSKernelBfyxOpt::GetJitConstants(const rms_params& params, Dispatc
             MakeJitConstant("SLM_SIZE", dispatchData.maxSlmSize),
             MakeJitConstant("STACK_SIZE", stack_size)
         });
+        // std::cout << "90. DATA_SIZE: " << data_size << std::endl;
     } else {
         jit.AddConstants({
             MakeJitConstant("DATA_SIZE", dispatchData.dataSize),
@@ -94,7 +95,9 @@ JitConstants RMSKernelBfyxOpt::GetJitConstants(const rms_params& params, Dispatc
             MakeJitConstant("SLM_SIZE", dispatchData.lws[0]),
             MakeJitConstant("STACK_SIZE", dispatchData.itemsNum + 1)
         });
+        // std::cout << "98. DATA_SIZE: " << dispatchData.dataSize << std::endl;
     }
+
     jit.AddConstant(MakeJitConstant("SUB_GROUP_SIZE", subgroup_size));
     jit.AddConstant(MakeJitConstant("SUBGROUP_BLOCK_SIZE", dispatchData.subgroupBlockSize));
     if (!params.fused_ops.empty()) {
@@ -125,6 +128,20 @@ JitConstants RMSKernelBfyxOpt::GetJitConstants(const rms_params& params, Dispatc
 
         auto conf = FusedOpsConfiguration("", idx_order, "normalized", params.outputs[0].GetDType(), 1);
         jit.Merge(MakeFusedOpsJitConstants(params, { conf }));
+    }
+
+    if (params.dynamic_padding) {
+        jit.AddConstant(MakeJitConstant("DYNAMIC_PADDING", 1));
+        jit.AddConstant(MakeJitConstant("SLICE_START", params.slice_start));
+        jit.AddConstant(MakeJitConstant("SLICE_STOP", params.slice_stop));
+        jit.AddConstant(MakeJitConstant("SLICE_STRIDE", params.slice_stride));
+        jit.AddConstant(MakeJitConstant("SLICE_ELEM_SIZE", params.slice_elem_size));
+
+        // std::cout << "Slice start: " << params.slice_start << ", Slice stop: " << params.slice_stop << ", Slice stride: " << params.slice_stride
+        //           << ", slice_elem_size: " << params.slice_elem_size << std::endl
+        //           << std::endl;
+    } else {
+        jit.AddConstant(MakeJitConstant("DYNAMIC_PADDING", 0));
     }
 
     return jit;

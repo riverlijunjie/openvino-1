@@ -91,7 +91,7 @@ void Plugin::transform_model(std::shared_ptr<ov::Model>& model, const ExecutionC
 
     auto start = Time::now();
     transformations.apply(model);
-    GPU_DEBUG_LOG << "Transformations time: " << std::chrono::duration_cast<ms>(Time::now() - start).count() << " ms" << std::endl;
+    std::cout << "Transformations time: " << std::chrono::duration_cast<ms>(Time::now() - start).count() << " ms" << std::endl;
 }
 
 std::shared_ptr<ov::Model> Plugin::clone_and_transform_model(const std::shared_ptr<const ov::Model>& model,
