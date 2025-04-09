@@ -17,7 +17,8 @@ using namespace ov::op;
 namespace {
 #define ACCESSOR(type)                                                                \
     void on_adapter(const std::string& name, ValueAccessor<type>& adapter) override { \
-        m_attributes_map[name] = adapter.get();                                       \
+         m_attr_id ++;                                                                 \
+         m_attributes_map[m_attr_id] = adapter.get();                                  \
     };
 #define ACCESSOR_V(type) ACCESSOR(type) ACCESSOR(std::vector<type>)
 
@@ -45,12 +46,22 @@ public:
     void on_adapter(const std::string& name, ValueAccessor<std::shared_ptr<ov::Model>>& adapter) override {
         OPENVINO_THROW_NOT_IMPLEMENTED("Can not compare models");
     };
-    ov::AnyMap get_attributes_map() const {
+    std::map<int, Any> get_attributes_map() const {
         return m_attributes_map;
     };
 
+    // we don't care about name of attributes since the Comparing is done on same type of nodes.
+    std::string get_name_with_context() override {
+        return {};
+    }
+    void start_structure(const std::string& name) override {}
+    std::string finish_structure() override {
+        return {};
+    }
+
 private:
-    ov::AnyMap m_attributes_map;
+    int m_attr_id = 0;
+    std::map<int, Any> m_attributes_map;
 };
 
 bool inputs_from_same_source_or_equal_constants(const std::shared_ptr<Node>& lhs, const std::shared_ptr<Node>& rhs) {
@@ -187,7 +198,13 @@ bool shape_of_upgrade(const shared_ptr<Model>& model) {
 bool pass::SharedOpOptimization::run_on_model(const shared_ptr<Model>& model) {
     RUN_ON_FUNCTION_SCOPE(SharedOpOptimization);
 
+    std::cout << "\SharedOpOptimization start... ops_size = " << model->get_ordered_ops().size() << std::endl;
+    auto start_time = std::chrono::high_resolution_clock::now();
+
     bool rewritten = shape_of_upgrade(model);
     rewritten = shared_node_optimization(model) || rewritten;
+    auto end_time = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
+    std::cout << "\tSharedOpOptimization ret = " << rewritten << ", took " << duration << " ms" << std::endl;
     return rewritten;
 }
