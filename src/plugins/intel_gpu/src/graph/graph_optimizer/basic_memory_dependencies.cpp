@@ -16,6 +16,11 @@ void basic_memory_dependencies::run(program& p) {
     OV_ITT_SCOPED_TASK(ov::intel_gpu::itt::domains::intel_gpu_plugin, "pass::BasicMemoryDependencies");
     auto itr = p.get_processing_order().begin();
     std::vector<size_t> past_outputs;
+
+    std::cout << "basic_memory_dependencies: processing_order = " << p.get_processing_order().size() << std::endl;
+    auto start_time = std::chrono::high_resolution_clock::now();
+    // return;
+
     while (itr != p.get_processing_order().end()) {
         auto& node = *itr;
         itr++;
@@ -66,4 +71,7 @@ void basic_memory_dependencies::run(program& p) {
             }
         }
     }
+    auto end_time = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
+    std::cout << "basic_memory_dependencies took " << duration << " ms" << std::endl;
 }

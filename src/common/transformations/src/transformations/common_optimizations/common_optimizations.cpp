@@ -128,6 +128,9 @@ bool ov::pass::CommonOptimizations::run_on_model(const std::shared_ptr<ov::Model
     ov::pass::Manager manager(get_pass_config(), "CommonOptimizations");
     manager.set_per_pass_validation(false);
 
+    std::cout << "CommonOptimizations start... " << std::endl;
+    auto start_time = std::chrono::high_resolution_clock::now();
+
     using namespace ov::pass;
     REGISTER_PASS(manager, DisableDecompressionConvertConstantFolding)
     // MOCTransformations contain StridedSliceOptimization transformation,
@@ -261,6 +264,11 @@ bool ov::pass::CommonOptimizations::run_on_model(const std::shared_ptr<ov::Model
     REGISTER_PASS(manager, StridesOptimization)
     REGISTER_PASS(manager, Validate)
     manager.run_passes(f);
+
+    std::cout << "CommonOptimizations is done " << std::endl;
+    auto end_time = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
+    std::cout << "CommonOptimizations took " << duration << " ms" << std::endl;
 
     // Returning value is false because pass::Manager always apply Validation pass
     // if function was changed. This helps to avoid excess Validations after applying

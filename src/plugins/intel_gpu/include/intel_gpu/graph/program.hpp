@@ -72,7 +72,7 @@ public:
             return 1 + (int32_t)std::distance(_processing_order.begin(), const_iterator(iter));
         }
         void calculate_BFS_processing_order();
-        size_t size() { return _processing_order.size(); }
+        size_t size() const { return _processing_order.size(); }
         bool is_correct(program_node* node);
 
         node_iterator get_processing_iterator(program_node& node) const { return processing_order_iterators.at(&node); }
@@ -274,6 +274,7 @@ public:
                              bool is_internal);
     static void init_primitives();
     kernels_cache& get_kernels_cache() const;
+    std::shared_ptr<kernels_cache> get_kernels_cache_shared() const;
 
     // returns {-1, -1} if it failed to estimate by allocating given batch size
     std::pair<int64_t/*const alloc*/, int64_t/*general alloc*/> get_estimated_device_mem_usage();

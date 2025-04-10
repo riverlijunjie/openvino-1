@@ -72,6 +72,12 @@ void oooq_memory_dependencies::run(program& p) {
     // giving us mapping of node to set of all users that can be reached from this node.
     auto& processing_order = p.get_processing_order();
     std::list<program_node*> processing_order_except_const;
+
+    return;
+    std::cout << "oooq_memory_dependencies: processing_order = " << processing_order.size() << std::endl;
+    auto start_time = std::chrono::high_resolution_clock::now();
+    // return;
+
     for (auto n : processing_order) {
         if (!n->is_type<data>()) {
             processing_order_except_const.push_back(n);
@@ -176,4 +182,8 @@ void oooq_memory_dependencies::run(program& p) {
             B++;
         }
     }
+
+    auto end_time = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
+    std::cout << "oooq_memory_dependencies took " << duration << " ms" << std::endl;
 }

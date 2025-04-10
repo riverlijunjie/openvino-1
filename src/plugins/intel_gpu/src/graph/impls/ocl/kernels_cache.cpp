@@ -508,6 +508,11 @@ std::vector<kernel::ptr> kernels_cache::get_kernels(const kernel_impl_params& pa
         current_node_id = params.desc->id;
     }
     auto res = _kernels.find(params);
+
+    // if (_kernels.end() == res) {
+    //     return {};
+    // }
+
     OPENVINO_ASSERT(_kernels.end() != res, "Kernel for {" + current_node_id + "} is not found in the kernel cache!");
     OPENVINO_ASSERT(res->second.size() != 0, "Number of kernels should not be zero for " + current_node_id);
 
@@ -681,6 +686,93 @@ void kernels_cache::add_to_cached_kernels(const std::vector<kernel::ptr>& kernel
             _cached_kernels[key] = kernel;
         }
     }
+}
+
+kernels_cache::compiled_kernels_iter_res kernels_cache::get_compiled_kernels(const kernel_impl_params& params) {
+    std::lock_guard<std::mutex> lock(_mutex);
+    for (const auto& it : _kernels) {
+        if (it.first == params) {
+            return {true, it.second};
+        }
+    }
+    return {false, {}};
+}
+
+kernels_cache::compiled_kernels_iter_res kernels_cache::match_compiled_kernels(const kernel_impl_params& params) {
+    auto match_params = [&](const kernel_impl_params& p1, const kernel_impl_params& p2) {
+        if ((p1.desc != nullptr && p2.desc == nullptr) || (p1.desc == nullptr && p2.desc != nullptr))
+            return false;
+
+        // id should be different
+        // if (p1.desc->id != p2.desc->id) {
+        //     return false;
+        // }
+
+        if (p1.desc->type != p2.desc->type) {
+            return false;
+        }
+
+        if (p1.input_layouts.size() != p2.input_layouts.size()) {
+            return false;
+        }
+        for (size_t i = 0; i < p1.input_layouts.size(); ++i) {
+            if (p1.input_layouts[i] != p2.input_layouts[i]) {
+                return false;
+            }
+        }
+        if (p1.output_layouts.size() != p2.output_layouts.size()) {
+            return false;
+        }
+        for (size_t i = 0; i < p1.output_layouts.size(); ++i) {
+            if (p1.output_layouts[i] != p2.output_layouts[i]) {
+                return false;
+            }
+        }
+        if (p1.fused_desc.size() != p2.fused_desc.size()) {
+            return false;
+        }
+
+        return true;
+    };
+    std::lock_guard<std::mutex> lock(_mutex);
+    // std::cout << "\t\t[match_compiled_kernels]: current kernels_size = " << _kernels.size() << std::endl;
+    size_t i = 0;
+    for (const auto& it : _kernels) {
+        if (match_params(it.first, params)) {
+            // std::cout << "\t\t\tget matched kernels from cache, idx = " << i << ", get_item_size = " << it.second.size() << std::endl;
+            return {true, it.second};
+        }
+        i++;
+    }
+    // If we reach here, it means that the kernel was not found in the cache.
+    // auto res = _kernels.find(params);
+    // assert(_kernels.end() == res);
+    // std::cout << "\t\t\tcannot get matched kernels from cache" << std::endl;
+    return {false, {}};
+}
+
+void kernels_cache::add_compiled_kernels(const kernel_impl_params& params, compiled_kernels_iter& kernels) {
+    std::lock_guard<std::mutex> lock(_mutex);
+    // std::cout << "\t\t[add_compiled_kernels]: kernels_size = " << _kernels.size() << std::endl;
+    // if (!kernels.empty() && (_kernels.find(params) == _kernels.end())) {
+    if (_kernels.find(params) == _kernels.end()) {
+        compiled_kernels_iter compiled_kernels = {};
+        for (auto& k : kernels) {
+            auto kernel = k.first->clone(false);
+            auto kernel_part_idx = k.second;
+            compiled_kernels.push_back(std::make_pair(kernel, kernel_part_idx));
+        }
+        // _kernels[params] = compiled_kernels;
+        _kernels.insert(std::make_pair(params, compiled_kernels));
+        // if (_kernels.find(params) == _kernels.end()) {
+        //     std::cout << "Failed to insert kernels into the cache." << std::endl;
+        // }
+        // std::cout << "\t\t\tadd compiled kernels to cache done, new_kernels_size = " << _kernels.size() << std::endl;
+    }
+}
+
+size_t kernels_cache::get_kernel_size() const {
+    return _kernels.size();
 }
 
 void kernels_cache::save(BinaryOutputBuffer& ob) const {

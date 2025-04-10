@@ -93,6 +93,8 @@ public:
     };
 
     using compiled_kernels = std::unordered_map<kernel_impl_params, std::vector<std::pair<kernel::ptr, size_t>>, impl_hasher>;
+    using compiled_kernels_iter = std::vector<std::pair<kernel::ptr, size_t>>;
+    using compiled_kernels_iter_res = std::pair<bool, compiled_kernels_iter>;
 
 private:
     static std::mutex _mutex;
@@ -143,6 +145,16 @@ public:
     std::string get_cached_kernel_id(kernel::ptr kernel) const;
     std::vector<std::string> get_cached_kernel_ids(const std::vector<kernel::ptr>& kernels) const;
     void add_to_cached_kernels(const std::vector<kernel::ptr>& kernels);
+
+    compiled_kernels_iter_res get_compiled_kernels(const kernel_impl_params& params);
+    compiled_kernels_iter_res match_compiled_kernels(const kernel_impl_params& params);
+
+    void set_used() {
+        _pending_compilation = false;
+    }
+    size_t get_kernel_size() const;
+
+    void add_compiled_kernels(const kernel_impl_params& params, compiled_kernels_iter& kernels);
 
     size_t get_kernel_batch_hash(const kernel_impl_params& params) const {
         if (_kernel_batch_hash.find(params) != _kernel_batch_hash.end())

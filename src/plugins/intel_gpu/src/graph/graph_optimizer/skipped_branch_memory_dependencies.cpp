@@ -16,6 +16,11 @@ void skipped_branch_memory_dependencies::run(program& p) {
     // processing_num(usr) > processing_num(A) Otherwise it could override data that has to be used in the future.
     auto& processing_order = p.get_processing_order();
     auto itrB = processing_order.begin();
+
+    std::cout << "skipped_branch_memory_dependencies: processing_order = " << processing_order.size() << std::endl;
+    auto start_time = std::chrono::high_resolution_clock::now();
+    // return;
+
     while (itrB != processing_order.end()) {
         auto& nodeB = *itrB;
         auto itrA = ++itrB;
@@ -41,4 +46,8 @@ void skipped_branch_memory_dependencies::run(program& p) {
             add_memory_dependency(nodeB, nodeA);
         }
     }
+
+    auto end_time = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
+    std::cout << "skipped_branch_memory_dependencies took " << duration << " ms" << std::endl;
 }

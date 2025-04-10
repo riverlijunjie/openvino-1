@@ -109,12 +109,12 @@ bool shared_node_optimization(const shared_ptr<Model>& model) {
         index_map[order[i]] = i;
     for (const auto& op : order) {
         // Recursively apply transformation for sub-graph based operations
-        if (auto multi_subgraph_op = ov::as_type_ptr<op::util::MultiSubGraphOp>(op)) {
-            for (const auto& sub_graph : multi_subgraph_op->get_functions()) {
-                if (sub_graph)
-                    rewritten = shared_node_optimization(sub_graph) || rewritten;
-            }
-        }
+        // if (auto multi_subgraph_op = ov::as_type_ptr<op::util::MultiSubGraphOp>(op)) {
+        //     for (const auto& sub_graph : multi_subgraph_op->get_functions()) {
+        //         if (sub_graph)
+        //             rewritten = shared_node_optimization(sub_graph) || rewritten;
+        //     }
+        // }
         for (auto& output : op->outputs()) {
             const auto& target_inputs = output.get_target_inputs();
             if (target_inputs.size() <= 1)

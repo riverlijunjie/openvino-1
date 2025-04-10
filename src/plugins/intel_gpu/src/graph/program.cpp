@@ -107,6 +107,8 @@
 using namespace cldnn;
 using namespace ov::intel_gpu;
 
+static std::shared_ptr<kernels_cache> _kernels_cache_shared[2];
+
 static ov::threading::IStreamsExecutor::Config make_task_executor_config(const ExecutionConfig& config, std::string tags, int num_streams = 0) {
     int streams = (num_streams > 0) ? num_streams : config.get_compilation_num_threads();
     auto priority = config.get_host_task_priority();
@@ -233,6 +235,16 @@ void program::init_program() {
 
     _kernels_cache->set_kernels_reuse(_config.get_enable_kernels_reuse());
 
+    if (_kernels_cache_shared[0] == nullptr) {
+        _kernels_cache_shared[0] = std::make_shared<kernels_cache>(_engine,
+                                                                         _config,
+                                                                         prog_id,
+                                                                         program::make_task_executor(_config),
+                                                                         kernel_selector::KernelBase::get_db().get_batch_headers());
+        _kernels_cache_shared[0]->set_kernels_reuse(true);
+        _kernels_cache_shared[0]->set_used();
+    }
+
     if (!_compilation_context)
         _compilation_context = program::make_compilation_context(_config);
 
@@ -262,6 +274,10 @@ void program::init_primitives() {
 
 kernels_cache& program::get_kernels_cache() const {
     return *_kernels_cache;
+}
+
+std::shared_ptr<kernels_cache> program::get_kernels_cache_shared() const {
+    return _kernels_cache_shared[0];
 }
 
 program::ptr program::build_program(engine& engine,
