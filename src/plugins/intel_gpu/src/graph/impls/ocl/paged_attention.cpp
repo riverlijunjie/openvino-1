@@ -1156,5 +1156,5 @@ attach_paged_attention_impl::attach_paged_attention_impl() {
 }  // namespace ocl
 }  // namespace cldnn
 
-BIND_BINARY_BUFFER_WITH_TYPE(cldnn::ocl::paged_attention_impl)
-BIND_BINARY_BUFFER_WITH_TYPE(cldnn::paged_attention)
+// BIND_BINARY_BUFFER_WITH_TYPE(cldnn::ocl::paged_attention_impl)
+// BIND_BINARY_BUFFER_WITH_TYPE(cldnn::paged_attention)

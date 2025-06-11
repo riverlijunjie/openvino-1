@@ -8,7 +8,7 @@
 #include "primitive_cm_base.hpp"
 #include "primitive_inst.h"
 #include "registry/implementation_manager.hpp"
-#include "utils/kernel_generator.hpp"
+#include "utils/kernel_generator_cm.hpp"
 
 namespace ov::intel_gpu::cm {
 namespace {
