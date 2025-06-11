@@ -33,6 +33,23 @@ JitConstants KernelGenerator::make_tensors_jit_constants(const RuntimeParams& pa
     return jit_constants;
 }
 
+inline bool param_is_dynamic(const RuntimeParams& params) {
+    if (params.is_dynamic()) {
+        return true;
+    }
+    for (const auto& layout : params.input_layouts) {
+        if (layout.data_padding.is_dynamic()) {
+            return true;
+        }
+    }
+    for (const auto& layout : params.output_layouts) {
+        if (layout.data_padding.is_dynamic()) {
+            return true;
+        }
+    }
+    return false;
+}
+
 JitConstants KernelGenerator::make_base_jit_constants(const RuntimeParams& params) const {
     JitConstants jit_constants;
 
@@ -40,7 +57,7 @@ JitConstants KernelGenerator::make_base_jit_constants(const RuntimeParams& param
     jit_constants.add(make_jit_constant("KERNEL(name)", "__kernel void " + entry_point));
     jit_constants.add(make_jit_constant("KERNEL_ID", entry_point));
 
-    if (params.is_dynamic()) {
+    if (param_is_dynamic(params)) {
         jit_constants.add(make_jit_constant("IS_DYNAMIC", 1));
         jit_constants.add(make_jit_constant("OPTIONAL_SHAPE_INFO_ARG", "__global const int* shape_info,"));
         jit_constants.add(make_jit_constant("OPTIONAL_SHAPE_INFO_TENSOR", "shape_info,"));

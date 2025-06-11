@@ -452,7 +452,8 @@ void kernels_cache::build_batch(const batch_program& batch, compiled_kernels& co
                        _kernel_batch_hash[params] = batch.hash_value;
                     }
                 } else {
-                    throw std::runtime_error("Could not find entry point");
+                    throw std::runtime_error("Could not find entry point: " + entry_point + " in batch "
+                                             + std::to_string(batch.bucket_id) + "_part_" + std::to_string(batch.batch_id));
                 }
             }
         }
@@ -467,6 +468,10 @@ void kernels_cache::build_batch(const batch_program& batch, compiled_kernels& co
         }
         if (dump_sources && dump_file.good())
             dump_file << "*/\n";
+
+        std::cout << "kernel source: " << std::endl;
+        for (auto& s : batch.source)
+            std::cout << s << std::endl;
     }
     if (!err_log.empty()) {
         GPU_DEBUG_INFO << "-------- OpenCL build error" << std::endl;

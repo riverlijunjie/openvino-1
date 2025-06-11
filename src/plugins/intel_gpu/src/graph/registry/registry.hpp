@@ -6,6 +6,8 @@
 
 #include "implementation_map.hpp"
 
+#define ENABLE_CM_PA 1
+
 #ifdef ENABLE_ONEDNN_FOR_GPU
     #define OV_GPU_WITH_ONEDNN 1
 #else
@@ -143,6 +145,9 @@ REGISTER_IMPLS(lstm_cell);
 REGISTER_IMPLS(lstm_seq);
 REGISTER_IMPLS(gru_seq);
 REGISTER_IMPLS(non_max_suppression);
+#if ENABLE_CM_PA
+REGISTER_IMPLS(paged_attention);
+#endif
 REGISTER_IMPLS(pooling);
 REGISTER_IMPLS(reduce);
 REGISTER_IMPLS(reorder);
@@ -191,7 +196,10 @@ REGISTER_DEFAULT_IMPLS(mvn, OCL_S, OCL_D);
 REGISTER_DEFAULT_IMPLS(matrix_nms, OCL_S);
 REGISTER_DEFAULT_IMPLS(normalize, OCL_S);
 REGISTER_DEFAULT_IMPLS(one_hot, OCL_S);
+#if ENABLE_CM_PA
+#else
 REGISTER_DEFAULT_IMPLS(paged_attention, OCL_S, OCL_D);
+#endif
 REGISTER_DEFAULT_IMPLS(permute, OCL_S, OCL_D);
 REGISTER_DEFAULT_IMPLS(prior_box, OCL_S);
 REGISTER_DEFAULT_IMPLS(quantize, OCL_S, OCL_D);
