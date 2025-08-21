@@ -258,6 +258,8 @@ private:
     void set_variables_state_info(const std::string& variable_id, const layout& variable_layout, ov::element::Type user_specified_type, const primitive* p, bool transpose_required);
     void dump_memory_pool(std::string dump_path, int64_t curr_iter);
 
+    size_t get_execution_order(const std::string& id) const;
+
 #ifdef GPU_DEBUG_CONFIG
     mutable int64_t iteration = 0;
     friend class NetworkDebugHelper;

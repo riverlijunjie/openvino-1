@@ -766,21 +766,68 @@ void network::execute_impl(const std::vector<event::ptr>& events) {
     const size_t flush_frequency = needs_flushing ? 16 : 0;
     size_t executed_prims = 0;
 
-    for (auto& inst : _exec_order) {
-        NODE_DEBUG(*inst);
+    static size_t infer_cnt = -1;
+    infer_cnt++;
+    std::cout << "Executing network with id: " << net_id << ", infer count: " << infer_cnt << std::endl;
 
-        inst->reset_events();
+    size_t dump_id = 1;
+    auto dump_id_str = getenv("DUMP_FRAME_ID");
+    if (dump_id_str) {
+        dump_id = std::stoul(dump_id_str);
+    }
 
-        if (inst->is_input()) {
-            inst->add_dep_events(events);
+    if (infer_cnt == dump_id) {
+        auto skip_layer_id_str = getenv("SKIP_LAYER_ID");
+        auto skip_layer_num_str = getenv("SKIP_LAYER_NUM");
+
+        size_t skip_layer_id = 0;
+        size_t skip_layer_num = 1;
+        if (skip_layer_id_str) {
+            skip_layer_id = std::stoul(skip_layer_id_str);
+        }
+        if (skip_layer_num_str) {
+            skip_layer_num = std::stoul(skip_layer_num_str);
         }
 
-        inst->prepare_primitive();
-        inst->execute();
+        for (auto& inst : _exec_order) {
+            const std::string layer_name = inst->id();
+            const size_t _current_exec_order = get_execution_order(layer_name);
 
-        executed_prims++;
-        if (needs_flushing && executed_prims % flush_frequency == 0)
-            get_stream().flush();
+            NODE_DEBUG(*inst);
+
+            inst->reset_events();
+
+            if (inst->is_input()) {
+                inst->add_dep_events(events);
+            }
+
+            inst->prepare_primitive();
+
+            if (_current_exec_order >= skip_layer_id && _current_exec_order < skip_layer_id + skip_layer_num) {
+                std::cout << "Skipping layer: " << layer_name << " with execution order: " << _current_exec_order << std::endl;
+            } else {
+                inst->execute();
+            }
+
+            executed_prims++;
+            if (needs_flushing && executed_prims % flush_frequency == 0)
+                get_stream().flush();
+        }
+    } else {
+        for (auto& inst : _exec_order) {
+            inst->reset_events();
+
+            if (inst->is_input()) {
+                inst->add_dep_events(events);
+            }
+
+            inst->prepare_primitive();
+            inst->execute();
+
+            executed_prims++;
+            if (needs_flushing && executed_prims % flush_frequency == 0)
+                get_stream().flush();
+        }
     }
 
     // Using output of previous network as input to another one may cause hazard (in OOOQ mode) if user would not
@@ -840,6 +887,17 @@ std::vector<primitive_id> network::get_all_primitive_org_ids() const {
     ret.reserve(_primitives.size());
     for (auto const& primitive : _primitives) ret.push_back(primitive.second->org_id());
     return ret;
+}
+
+size_t network::get_execution_order(const std::string& id) const {
+    size_t order = -1;
+    for (const auto& executed_primitive : _exec_order) {
+        order++;
+        if (executed_primitive->id() == id) {
+            return order;
+        }
+    }
+    return -1;
 }
 
 const program::primitives_info& network::get_primitives_info() const {

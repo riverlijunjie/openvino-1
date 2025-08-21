@@ -942,7 +942,7 @@ public:
     PagedAttentionSDPAOptGeneratorMultiToken() : SDPAOptGeneratorBase("sdpa_opt", "_multi_tokens", false) {}
     [[nodiscard]] Arguments get_arguments_desc(const kernel_impl_params& params) const override {
         const auto desc = params.typed_desc<paged_attention>();
-        const auto has_alibi = params.get_input_layout(11).count() > 0;
+        const auto has_alibi = params.get_input_layout(PagedAttentionInputIdx::ALIBI).count() > 0;
         const auto has_scale_input = !desc->scale_val.has_value();
         const auto has_scores_output = desc->has_scores_output();
         const auto has_score_aggregation = desc->has_score_aggregation;
