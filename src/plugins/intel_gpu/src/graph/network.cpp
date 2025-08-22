@@ -766,22 +766,50 @@ void network::execute_impl(const std::vector<event::ptr>& events) {
     const size_t flush_frequency = needs_flushing ? 16 : 0;
     size_t executed_prims = 0;
 
-    for (auto& inst : _exec_order) {
-        NODE_DEBUG(*inst);
+ static size_t infer_cnt = -1;
+    infer_cnt++;
+    std::cout << "Executing network with id: " << net_id << ", infer count: " << infer_cnt << std::endl;
 
-        inst->reset_events();
-
-        if (inst->is_input()) {
-            inst->add_dep_events(events);
-        }
-
-        inst->prepare_primitive();
-        inst->execute();
-
-        executed_prims++;
-        if (needs_flushing && executed_prims % flush_frequency == 0)
-            get_stream().flush();
+    size_t dump_id = 1;
+    auto dump_id_str = getenv("DUMP_FRAME_ID");
+    if (dump_id_str) {
+        dump_id = std::stoul(dump_id_str);
     }
+
+    if (infer_cnt == dump_id) {
+        for (auto& inst : _exec_order) {
+            NODE_DEBUG(*inst);
+
+            inst->reset_events();
+
+            if (inst->is_input()) {
+                inst->add_dep_events(events);
+            }
+
+            inst->prepare_primitive();
+            inst->execute();
+
+            executed_prims++;
+            if (needs_flushing && executed_prims % flush_frequency == 0)
+                get_stream().flush();
+        }
+    } else {
+        for (auto& inst : _exec_order) {
+            inst->reset_events();
+
+            if (inst->is_input()) {
+                inst->add_dep_events(events);
+            }
+
+            inst->prepare_primitive();
+            inst->execute();
+
+            executed_prims++;
+            if (needs_flushing && executed_prims % flush_frequency == 0)
+                get_stream().flush();
+        }
+    }
+
 
     // Using output of previous network as input to another one may cause hazard (in OOOQ mode) if user would not
     // provide proper event to execution. Flushing pipeline should prevent this kind of issues.
@@ -883,6 +911,17 @@ std::vector<primitive_inst*> network::get_primitives(const std::vector<primitive
         return get_primitive(id).get();
     });
     return result;
+}
+
+size_t network::get_execution_order(const std::string& id) const {
+    size_t order = -1;
+    for (const auto& executed_primitive : _exec_order) {
+        order++;
+        if (executed_primitive->id() == id) {
+            return order;
+        }
+    }
+    return -1;
 }
 
 std::vector<std::pair<primitive_inst*, int>> network::get_primitives(const std::vector<std::pair<program_node*, int>>& nodes) {

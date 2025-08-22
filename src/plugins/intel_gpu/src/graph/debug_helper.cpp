@@ -240,34 +240,34 @@ std::string get_matched_from_filelist(const std::vector<std::string>& file_names
     return std::string();
 }
 
-bool is_layer_name_matched(const std::string& layer_name, const std::string& pattern) {
-    auto upper_layer_name = std::string(layer_name.length(), '\0');
-    std::transform(layer_name.begin(), layer_name.end(), upper_layer_name.begin(), ::toupper);
-    auto upper_pattern = std::string(pattern.length(), '\0');
-    std::transform(pattern.begin(), pattern.end(), upper_pattern.begin(), ::toupper);
+// bool is_layer_name_matched(const std::string& layer_name, const std::string& pattern) {
+//     auto upper_layer_name = std::string(layer_name.length(), '\0');
+//     std::transform(layer_name.begin(), layer_name.end(), upper_layer_name.begin(), ::toupper);
+//     auto upper_pattern = std::string(pattern.length(), '\0');
+//     std::transform(pattern.begin(), pattern.end(), upper_pattern.begin(), ::toupper);
 
-    // Check pattern from exec_graph
-    size_t pos = upper_layer_name.find(':');
-    auto upper_exec_graph_name = upper_layer_name.substr(pos + 1, upper_layer_name.size());
-    if (upper_exec_graph_name.compare(upper_pattern) == 0) {
-        return true;
-    }
+//     // Check pattern from exec_graph
+//     size_t pos = upper_layer_name.find(':');
+//     auto upper_exec_graph_name = upper_layer_name.substr(pos + 1, upper_layer_name.size());
+//     if (upper_exec_graph_name.compare(upper_pattern) == 0) {
+//         return true;
+//     }
 
-    // Check pattern with regular expression
-    std::regex re(upper_pattern);
-    return std::regex_match(upper_layer_name, re);
-}
+//     // Check pattern with regular expression
+//     std::regex re(upper_pattern);
+//     return std::regex_match(upper_layer_name, re);
+// }
 
-bool is_layer_for_dumping(const ExecutionConfig& config, const std::string& layer_name) {
-    const auto& dump_layers = config.get_dump_layer_names();
-    if (dump_layers.empty())
-        return true;
+// bool is_layer_for_dumping(const ExecutionConfig& config, const std::string& layer_name) {
+//     const auto& dump_layers = config.get_dump_layer_names();
+//     if (dump_layers.empty())
+//         return true;
 
-    auto iter = std::find_if(dump_layers.begin(), dump_layers.end(), [&](const std::string& dl){
-        return is_layer_name_matched(layer_name, dl);
-    });
-    return (iter != dump_layers.end());
-}
+//     auto iter = std::find_if(dump_layers.begin(), dump_layers.end(), [&](const std::string& dl){
+//         return is_layer_name_matched(layer_name, dl);
+//     });
+//     return (iter != dump_layers.end());
+// }
 
 std::vector<std::string> get_filenames_for_matched_layer_loading_binaries(const ExecutionConfig& config, const std::string& id) {
     std::vector<std::string> file_names;
@@ -382,12 +382,16 @@ NodeDebugHelper::NodeDebugHelper(const primitive_inst& inst)
     if (config.get_dump_tensors_path().length() > 0) {
         const std::string& layer_name = inst.id();
 
-        if (is_target_iteration(m_iter, config.get_dump_iterations()) &&
-            config.get_dump_tensors() != ov::intel_gpu::DumpTensors::out && is_layer_for_dumping(config, layer_name)) {
-            m_stream.finish(); // Wait for stream completion before dumping input buffers
+        const size_t _exec_order = m_network.get_execution_order(layer_name);
+
+        std::cout << "id = " << _exec_order << ", layer_name = " << layer_name << std::endl;
+
+        if (is_target_iteration(m_iter, config.get_dump_iterations()) && config.get_dump_tensors() != ov::intel_gpu::DumpTensors::out &&
+            /*is_layer_for_dumping(config, layer_name)*/ _exec_order >= 112 && _exec_order < 141) {
+            m_stream.finish();  // Wait for stream completion before dumping input buffers
             std::string debug_str_for_bin_load = " Command for loading : OV_LOAD_DUMP_RAW_BINARY=\"" + layer_name + ":";
             for (size_t i = 0; i < m_inst.dependencies().size(); i++) {
-                std::string name = get_file_prefix() + "_src" + std::to_string(i);
+                std::string name = std::to_string(_exec_order) + std::string("_") + get_file_prefix() + "_src" + std::to_string(i);
                 auto input_mem = m_inst.dep_memory_ptr(i);
                 if (input_mem == nullptr) {
                     GPU_DEBUG_COUT  << " input_mem_" << i << " is nullptr. Nothing to dump." << std::endl;
@@ -431,14 +435,15 @@ NodeDebugHelper::~NodeDebugHelper() {
     if (config.get_dump_tensors_path().length() > 0) {
         const std::string layer_name = m_inst.id();
 
+        const size_t _exec_order = m_network.get_execution_order(layer_name);
         if (is_target_iteration(m_iter, config.get_dump_iterations()) &&
             config.get_dump_tensors() != ov::intel_gpu::DumpTensors::in &&
-            is_layer_for_dumping(config, layer_name)) {
+            /*is_layer_for_dumping(config, layer_name)*/ _exec_order >= 112 && _exec_order < 141) {
             m_stream.finish(); // Wait for stream completion before dumping output buffers
             std::string debug_str_for_bin_load = " Command for loading : OV_LOAD_DUMP_RAW_BINARY=\""
                                                     + layer_name + ":";
             for (size_t i = 0; i < m_inst.outputs_memory_count(); i++) {
-                std::string name = get_file_prefix() + "_dst" + std::to_string(i);
+                std::string name = std::to_string(_exec_order) + std::string("_") + get_file_prefix() + "_dst" + std::to_string(i);
                 auto output_mem = m_inst.output_memory_ptr(i);
                 if (output_mem == nullptr) {
                     GPU_DEBUG_COUT  << " output_mem is nullptr. Nothing to dump." << std::endl;
@@ -467,6 +472,57 @@ NodeDebugHelper::~NodeDebugHelper() {
                 }
             }
 
+            for (size_t i = 0; i < m_inst.get_intermediates_memories().size(); i++) {
+                std::string name = std::to_string(_exec_order) + std::string("_") + get_file_prefix() + "_intermediates_" + std::to_string(i);
+                auto output_mem = m_inst.get_intermediates_memories()[i];
+                if (output_mem == nullptr) {
+                    GPU_DEBUG_COUT << " intermediates_mem is nullptr. Nothing to dump." << std::endl;
+                    continue;
+                }
+
+                auto& output_layout = output_mem->get_layout();
+                if (config.get_dump_tensors_format() == ov::intel_gpu::DumpFormat::binary) {
+                    // Binary dump : raw
+                    auto filename = get_file_path_for_binary_dump(output_layout, name, config.get_dump_tensors_path());
+
+                    mem_lock<char, mem_lock_type::read> lock(output_mem, m_stream);
+                    ov::util::save_binary(filename, lock.data(), output_mem->size());
+                    GPU_DEBUG_COUT << " Dump layer dst : " << layer_name << " to " << filename << std::endl;
+                    debug_str_for_bin_load += (filename + ",");
+                } else {
+                    const bool dump_raw = config.get_dump_tensors_format() == ov::intel_gpu::DumpFormat::text_raw;
+                    GPU_DEBUG_COUT << " Dump " << (dump_raw ? "raw " : "") << name << std::endl;
+                    auto filename = config.get_dump_tensors_path() + get_name_for_dump(name) + ".txt";
+                    // Text dump
+                    log_memory_to_file(output_mem, output_layout, m_stream, filename, dump_raw);
+                }
+            }
+
+            for (size_t i = 0; i < m_inst.inputs_memory_count(); i++) {
+                std::string name = std::to_string(_exec_order) + std::string("_") + get_file_prefix() + "_updated_src_" + std::to_string(i);
+                auto output_mem = m_inst.input_memory_ptr(i);
+                if (output_mem == nullptr) {
+                    GPU_DEBUG_COUT << " updated_input_mem is nullptr. Nothing to dump." << std::endl;
+                    continue;
+                }
+
+                auto& output_layout = m_inst.get_input_layout(i);
+                if (config.get_dump_tensors_format() == ov::intel_gpu::DumpFormat::binary) {
+                    // Binary dump : raw
+                    auto filename = get_file_path_for_binary_dump(output_layout, name, config.get_dump_tensors_path());
+
+                    mem_lock<char, mem_lock_type::read> lock(output_mem, m_stream);
+                    ov::util::save_binary(filename, lock.data(), output_mem->size());
+                    GPU_DEBUG_COUT << " Dump layer dst : " << layer_name << " to " << filename << std::endl;
+                    debug_str_for_bin_load += (filename + ",");
+                } else {
+                    const bool dump_raw = config.get_dump_tensors_format() == ov::intel_gpu::DumpFormat::text_raw;
+                    GPU_DEBUG_COUT << " Dump " << (dump_raw ? "raw " : "") << name << std::endl;
+                    auto filename = config.get_dump_tensors_path() + get_name_for_dump(name) + ".txt";
+                    // Text dump
+                    log_memory_to_file(output_mem, output_layout, m_stream, filename, dump_raw);
+                }
+            }
             if (config.get_dump_tensors_format() == ov::intel_gpu::DumpFormat::binary && m_inst.is_input()) {
                 debug_str_for_bin_load[debug_str_for_bin_load.size()-1] = '\"';
                 GPU_DEBUG_COUT << debug_str_for_bin_load << std::endl;;

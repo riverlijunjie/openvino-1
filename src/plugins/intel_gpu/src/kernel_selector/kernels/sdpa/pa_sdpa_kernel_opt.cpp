@@ -326,6 +326,13 @@ JitConstants PagedAttentionSDPAKernelOpt::GetJitConstants(const pa_sdpa_params& 
 
     jit.Merge(MakeTypeJitConstants(softmax_acc_dt, "SOFTMAX_ACCUMULATOR"));
 
+    // if (kernel_idx == KernelsTypes::MULTI_TOKENS) {
+    //     std::cout << "JIT constants for MULTI_TOKENS kernel PA:" << std::endl;
+    //     for (auto it : jit.GetDefinitions()) {
+    //         std::cout << "jit[" << it.first << "] = " << it.second << std::endl;
+    //     }
+    // }
+
     return jit;
 }
 
@@ -470,6 +477,10 @@ void PagedAttentionSDPAKernelOpt::GetUpdateDispatchDataFunc(KernelData& kd) cons
         auto tmp_out_dt_size = BytesPerElement(softmax_acc_dt);
         auto tmp_out_elements_count = total_tokens * prim_params.conf.heads_num * prim_params.conf.v_head_size * num_of_partitions;
         auto tmp_out_size = tmp_out_elements_count * tmp_out_dt_size;
+
+        std::cout << "[GPU] SDPA kernel internal buffers sizes: prim_params.stage = " << prim_params.stage << "buf_size = " << buf_size << ", "
+                  << "tmp_out_size = " << tmp_out_size << ", total_tokens = " << total_tokens << ", heads_num = " << prim_params.conf.heads_num
+                  << ", v_head_size = " << prim_params.conf.v_head_size << ", num_of_partitions = " << num_of_partitions << std::endl;
 
         const bool lockable = true;
         kd.internalBuffers.clear();

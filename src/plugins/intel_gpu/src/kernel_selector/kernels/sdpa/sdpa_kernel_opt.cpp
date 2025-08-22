@@ -241,6 +241,13 @@ JitConstants SDPAKernelOpt::GetJitConstants(const sdpa_params& params, size_t ke
     if (params.engineInfo.supports_immad && params.conf.broadcast_axis == -1 && params.conf.k_head_size >= 128)
         jit.AddConstant(MakeJitConstant("LOAD_KEY_LEFTOVERS_IN_CALC_LOOP", 1));
 
+    // if (kernel_idx == KernelsTypes::MULTI_TOKENS) {
+    //     std::cout << "JIT constants for MULTI_TOKENS kernel SDPA:" << std::endl;
+    //     for (auto it : jit.GetDefinitions()) {
+    //         std::cout << "jit[" << it.first << "] = " << it.second << std::endl;
+    //     }
+    // }
+
     return jit;
 }
 
