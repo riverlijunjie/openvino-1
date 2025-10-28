@@ -228,6 +228,12 @@ void dump_i4u4(cldnn::data_types type, memory::ptr mem, stream& stream, std::ofs
         }
     } else {
         GPU_DEBUG_COUT << " supports raw dump only" << std::endl;
+        for (size_t i = 0; i < lock.size(); ++i) {
+            int8_t v0, v1;
+            unpack(type, mem_ptr[i], v0, v1);
+            buffer << std::fixed << std::setprecision(6) << static_cast<int>(v0) << std::endl;
+            buffer << std::fixed << std::setprecision(6) << static_cast<int>(v1) << std::endl;
+        }
     }
     file_stream << buffer.str();
 }

@@ -4,6 +4,9 @@
 
 #include "moe_opt.hpp"
 
+#define ENABLE_DUMP_DATA 0
+#define REPACK_SCALE_ZP 0
+
 // #define ENABLE_ONEDNN_FOR_GPU
 #ifdef ENABLE_ONEDNN_FOR_GPU
 #    include <initializer_list>
@@ -94,7 +97,8 @@ struct onednn_matmul {
             OPENVINO_ASSERT((k_group_size % 32) == 0);
             OPENVINO_ASSERT((m_K % k_group_size) == 0);
             m_K_groups = m_K / k_group_size;
-            attr.set_scales(DNNL_ARG_WEIGHTS, (1 << 0) + (1 << 1), {k_group_size, 1}, dnnl::memory::data_type::f16);
+            // attr.set_scales(DNNL_ARG_WEIGHTS, (1 << 0) + (1 << 1), {k_group_size, 1}, dnnl::memory::data_type::f16);
+            attr.set_scales(DNNL_ARG_WEIGHTS, 3 | (1 << 1), {k_group_size, 1}, dnnl::memory::data_type::f16);
         }
         return *this;
     }
@@ -106,7 +110,8 @@ struct onednn_matmul {
         } else {
             OPENVINO_ASSERT(m_K / k_group_size);
             m_K_groups = (m_K / k_group_size);
-            attr.set_zero_points(DNNL_ARG_WEIGHTS, (1 << 0) + (1 << 1), {k_group_size, 1}, m_w_type);
+            // attr.set_zero_points(DNNL_ARG_WEIGHTS, (1 << 0) + (1 << 1), {k_group_size, 1}, m_w_type);
+            attr.set_zero_points(DNNL_ARG_WEIGHTS, 3 | (1 << 1), {k_group_size, 1}, m_w_type);
         }
         return *this;
     }
@@ -302,10 +307,10 @@ struct onednn_linear {
         if (scale) {
             // https://uxlfoundation.github.io/oneDNN/page_weights_decompression_matmul_cpp.html
             // Quantization Group size for scales. Must be divisible by 32.
-            auto wei_scale_md = dnnl::memory::desc(dnnl::memory::dims({mm->m_K_groups, mm->m_N}), dnnl::memory::data_type::f16, dnnl::memory::format_tag::ab);
+            // auto wei_scale_md = dnnl::memory::desc(dnnl::memory::dims({mm->m_K_groups, mm->m_N}), dnnl::memory::data_type::f16, dnnl::memory::format_tag::ab);
             linear.scale = scale;  // dnnl::ocl_interop::make_memory(wei_scale_md, linear.m_engine, dnnl::ocl_interop::memory_kind::usm, scale);
             if (zp) {
-                auto wei_zp_md = dnnl::memory::desc(dnnl::memory::dims({mm->m_K_groups, mm->m_N}), mm->m_w_type, dnnl::memory::format_tag::ab);
+                // auto wei_zp_md = dnnl::memory::desc(dnnl::memory::dims({mm->m_K_groups, mm->m_N}), mm->m_w_type, dnnl::memory::format_tag::ab);
                 linear.zp = zp;  // dnnl::ocl_interop::make_memory(wei_zp_md, linear.m_engine, dnnl::ocl_interop::memory_kind::usm, zp);
             }
         }
@@ -518,6 +523,11 @@ dnnl::memory convert2dnnl(const memory::ptr& ptr, const std::vector<int64_t>& di
     return ptr->get_onednn_memory(dnnl::memory::desc(dnnl::memory::dims(dim), convert_data_type(ptr->get_layout().data_type), tag), offset);
 }
 
+dnnl::memory convert2dnnl(const memory::ptr& ptr, const std::vector<int64_t>& dim, const std::vector<int64_t>& stride, int64_t offset = 0) {
+    OV_ITT_SCOPED_TASK(ov::intel_gpu::itt::domains::intel_gpu_plugin, openvino::itt::handle("convert2dnnl_stride"));
+    return ptr->get_onednn_memory(dnnl::memory::desc(dnnl::memory::dims(dim), convert_data_type(ptr->get_layout().data_type), dnnl::memory::dims(stride)), offset);
+}
+
 class MOEOptImpl : public PrimitiveImplOCL {
 public:
     DECLARE_OBJECT_TYPE_SERIALIZATION(ov::intel_gpu::ocl::MOEOptImpl)
@@ -533,6 +543,10 @@ public:
         dnnl::memory scale;
         dnnl::memory zp;
         int ic, oc, ic_group_size;
+
+        cldnn::memory::ptr weight_ptr;
+        cldnn::memory::ptr scale_ptr;
+        cldnn::memory::ptr zp_ptr;
     };
 
     // expert_mask result in cpu side
@@ -554,7 +568,6 @@ public:
         memory::ptr weight[3];  // gate/up/down weights, experts fusion
         memory::ptr scale[3];
         memory::ptr zp[3];
-        memory::ptr bias[3];
     } moe_fusion_weights;
 
     struct scratch_buffers {
@@ -577,8 +590,8 @@ public:
         std::vector<expert_mask_gpu> expert_masks;
 
         moe_fusion_weights_base_addr moe_fusion_wei_addr;
-        memory::ptr input_routing_weights;
-        memory::ptr input_router_topk_idx;
+        // memory::ptr input_routing_weights;
+        // memory::ptr input_router_topk_idx;
     };
 
     std::vector<std::vector<dnnl_weights>> _dnnl_weights;
@@ -606,10 +619,17 @@ public:
 
     void init_dnnl_weights(const std::shared_ptr<const moe_fused_compressed>& cur_moe,
                            cldnn::engine& engine,
+                           typed_primitive_inst<moe_fused_compressed>& instance,
                            const struct moe_fusion_weights_base_addr& moe_fusion_wei_addr) {
         if (_dnnl_weights.size() == cur_moe->_config.num_expert)
             return;
         init(cur_moe);
+
+        // static bool need_print = true;
+        // if(need_print) {
+        //     need_print = false;
+        //     std::cout << "_hidden_size = " << _hidden_size << ", _intermediate_size = " << _intermediate_size << ", _group_size = " << _group_size << std::endl;
+        // }
 
         _dnnl_weights.resize(cur_moe->_config.num_expert);
         for (size_t j = 0; j < cur_moe->_config.num_expert; j++) {
@@ -625,27 +645,254 @@ public:
             dnnl_weights[2].ic_group_size = _group_size;
             dnnl_weights[2].oc = _hidden_size;
             for (int i = 0; i < 3; i++) {
-                // weight shape: [ic, oc], type: u4
-                int64_t wei_offset = j * dnnl_weights[i].ic * dnnl_weights[i].oc / 2;
-                dnnl_weights[i].weight =
-                    convert2dnnl(moe_fusion_wei_addr.weight[i], {dnnl_weights[i].ic, dnnl_weights[i].oc}, dnnl::memory::format_tag::ba, wei_offset);
+                if(0) {
+                    // weight shape: [ic, oc], type: u4
+                    int64_t wei_offset = j * dnnl_weights[i].ic * dnnl_weights[i].oc / 2;
+                    dnnl_weights[i].weight =
+                        convert2dnnl(moe_fusion_wei_addr.weight[i], {dnnl_weights[i].ic, dnnl_weights[i].oc}, dnnl::memory::format_tag::ba, wei_offset);
+                    // {
+                    //     size_t total_size = moe_fusion_wei_addr.weight[i]->get_layout().bytes_count();
+                    //     size_t used_size = cur_moe->_config.num_expert * dnnl_weights[i].ic * dnnl_weights[i].oc / 2;
+                    //     OPENVINO_ASSERT(total_size == used_size,
+                    //            "moe_fused_compressed: weight size isn't equal to expected, total_size=",
+                    //            total_size,
+                    //            ", used_size=",
+                    //            used_size);
+                    // }
 
-                // scale shape: [ic / ic_group_size, oc], type: f16
-                int64_t scale_offset = j * dnnl_weights[i].ic * dnnl_weights[i].oc / dnnl_weights[i].ic_group_size * 2;
-                dnnl_weights[i].scale = convert2dnnl(moe_fusion_wei_addr.scale[i],
-                                                     {dnnl_weights[i].ic / dnnl_weights[i].ic_group_size, dnnl_weights[i].oc},
-                                                     dnnl::memory::format_tag::ab,
-                                                     scale_offset);
+                    // scale shape: [ic / ic_group_size, oc], type: f16
+                    int64_t scale_offset = j * dnnl_weights[i].ic * dnnl_weights[i].oc / dnnl_weights[i].ic_group_size * 2;
+                    dnnl_weights[i].scale = convert2dnnl(moe_fusion_wei_addr.scale[i],
+                                                        {dnnl_weights[i].ic / dnnl_weights[i].ic_group_size, dnnl_weights[i].oc},
+                                                        dnnl::memory::format_tag::ab,
+                                                        scale_offset);
 
-                // zp shape: [ic / ic_group_size, oc], type: u4
-                int64_t zp_offset = j * dnnl_weights[i].ic * dnnl_weights[i].oc / dnnl_weights[i].ic_group_size / 2;
-                dnnl_weights[i].zp = convert2dnnl(moe_fusion_wei_addr.zp[i],
-                                                  {dnnl_weights[i].ic / dnnl_weights[i].ic_group_size, dnnl_weights[i].oc},
-                                                  dnnl::memory::format_tag::ab,
-                                                  zp_offset);
+                    // {
+                    //     size_t total_size = moe_fusion_wei_addr.scale[i]->get_layout().bytes_count();
+                    //     size_t used_size = cur_moe->_config.num_expert * dnnl_weights[i].ic * dnnl_weights[i].oc / dnnl_weights[i].ic_group_size * 2;
+                    //     OPENVINO_ASSERT(total_size == used_size,
+                    //            "moe_fused_compressed: scale size isn't equal to expected, total_size=",
+                    //            total_size,
+                    //            ", used_size=",
+                    //            used_size);
+                    // }
+
+                    // zp shape: [ic / ic_group_size, oc], type: u4
+                    int64_t zp_offset = j * dnnl_weights[i].ic * dnnl_weights[i].oc / dnnl_weights[i].ic_group_size / 2;
+                    dnnl_weights[i].zp = convert2dnnl(moe_fusion_wei_addr.zp[i],
+                                                    {dnnl_weights[i].ic / dnnl_weights[i].ic_group_size, dnnl_weights[i].oc},
+                                                    dnnl::memory::format_tag::ab,
+                                                    zp_offset);
+
+                    // {
+                    //     size_t total_size = moe_fusion_wei_addr.zp[i]->get_layout().bytes_count();
+                    //     size_t used_size = cur_moe->_config.num_expert * dnnl_weights[i].ic * dnnl_weights[i].oc / dnnl_weights[i].ic_group_size / 2;
+                    //     OPENVINO_ASSERT(total_size == used_size,
+                    //            "moe_fused_compressed: zp size isn't equal to expected, total_size=",
+                    //            total_size,
+                    //            ", used_size=",
+                    //            used_size);
+                    // }
+                } else {
+                    // weight shape: [ic, oc], type: u4
+                    ov::Shape wei_shape = {static_cast<size_t>(dnnl_weights[i].ic), static_cast<size_t>(dnnl_weights[i].oc)};
+                    auto wei_layout = cldnn::layout(wei_shape, cldnn::data_types::u4, cldnn::format::get_default_format(wei_shape.size()));
+                    auto wei_mem = engine.create_subbuffer(*moe_fusion_wei_addr.weight[i], wei_layout, j * dnnl_weights[i].ic * dnnl_weights[i].oc / 2);
+                    dnnl_weights[i].weight = convert2dnnl(wei_mem, {dnnl_weights[i].ic, dnnl_weights[i].oc}, dnnl::memory::format_tag::ba);
+                    dnnl_weights[i].weight_ptr = wei_mem;
+
+                    // scale shape: [ic / ic_group_size, oc], type: f16
+                    ov::Shape scale_shape = {static_cast<size_t>(dnnl_weights[i].ic / dnnl_weights[i].ic_group_size), static_cast<size_t>(dnnl_weights[i].oc)};
+                    auto scale_layout = cldnn::layout(scale_shape, cldnn::data_types::f16, cldnn::format::get_default_format(scale_shape.size()));
+                    auto scale_mem = engine.create_subbuffer(*moe_fusion_wei_addr.scale[i],
+                                                            scale_layout,
+                                                            j * dnnl_weights[i].ic * dnnl_weights[i].oc / dnnl_weights[i].ic_group_size * 2);
+                    dnnl_weights[i].scale =
+                        convert2dnnl(scale_mem, {dnnl_weights[i].ic / dnnl_weights[i].ic_group_size, dnnl_weights[i].oc}, {1, dnnl_weights[i].oc});
+                    dnnl_weights[i].scale_ptr = scale_mem;
+
+                    // zp shape: [ic / ic_group_size, oc], type: u4
+                    ov::Shape zp_shape = {static_cast<size_t>(dnnl_weights[i].ic / dnnl_weights[i].ic_group_size), static_cast<size_t>(dnnl_weights[i].oc)};
+                    auto zp_layout = cldnn::layout(zp_shape, cldnn::data_types::u4, cldnn::format::get_default_format(zp_shape.size()));
+                    auto zp_mem = engine.create_subbuffer(*moe_fusion_wei_addr.zp[i],
+                                                        zp_layout,
+                                                        j * dnnl_weights[i].ic * dnnl_weights[i].oc / dnnl_weights[i].ic_group_size / 2);
+                    dnnl_weights[i].zp =
+                        convert2dnnl(zp_mem, {dnnl_weights[i].ic / dnnl_weights[i].ic_group_size, dnnl_weights[i].oc}, {1, dnnl_weights[i].oc});
+                    dnnl_weights[i].zp_ptr = zp_mem;
+
+                    // auto& cur_net = instance.get_network();
+                    // auto& stream = cur_net.get_stream();
+                    // if(j==0 && i==0)
+                    //     dump_u4_gpu_memory(stream, wei_mem, "expert_" + std::to_string(j) + "_weight_" + std::to_string(i), 1, 256);
+                    // dump_fp16_gpu_memory(stream, scale_mem, "expert_" + std::to_string(j) + "_scale_" + std::to_string(i));
+                    // dump_u4_gpu_memory(stream, zp_mem, "expert_" + std::to_string(j) + "_zp_" + std::to_string(i));
+                }
             }
         }
     }
+
+#    if ENABLE_DUMP_DATA
+    float fp16_to_fp32(uint16_t half) {
+        uint16_t sign = (half >> 15) & 0x0001;
+        uint16_t exponent = (half >> 10) & 0x001F;
+        uint16_t mantissa = half & 0x03FF;
+
+        uint32_t f;
+
+        if (exponent == 0) {
+            if (mantissa == 0) {
+                f = (sign << 31);
+            } else {
+                while (!(mantissa & 0x0400)) {
+                    mantissa <<= 1;
+                    exponent--;
+                }
+                exponent++;
+                mantissa &= ~0x0400;
+                uint32_t f_exponent = (exponent + (127 - 15));
+                uint32_t f_mantissa = mantissa << 13;
+                f = (sign << 31) | (f_exponent << 23) | f_mantissa;
+            }
+        } else if (exponent == 31) {
+            if (mantissa == 0) {
+                f = (sign << 31) | 0x7F800000;
+            } else {  // NaN
+                f = (sign << 31) | 0x7F800000 | (mantissa << 13);
+            }
+        } else {
+            uint32_t f_exponent = (exponent + (127 - 15));
+            uint32_t f_mantissa = mantissa << 13;
+            f = (sign << 31) | (f_exponent << 23) | f_mantissa;
+        }
+
+        float result;
+        std::memcpy(&result, &f, sizeof(result));
+        return result;
+    }
+
+    void dump_fp16_gpu_memory(stream& stream, const memory::ptr& mem, const std::string& name, size_t m = 0, size_t n = 0) {
+        auto layout = mem->get_layout();
+        if (layout.data_type != cldnn::data_types::f16) {
+            std::cout << "Memory " << name << " is not of fp16 type." << std::endl;
+            return;
+        }
+
+        auto shape = layout.get_shape();
+        std::cout << "Dump f16 GPU memory: " << name << ", layout: " << layout.to_short_string();
+        size_t row = m, col = n;
+
+        if (m == 0 || n == 0) {
+            if (shape.size() == 1) {
+                row = 1;
+                col = shape[0] > 0 ? shape[0] : 1;
+            } else if (shape.size() == 2) {
+                row = shape[0] > 0 ? shape[0] : 1;
+                col = shape[1] > 0 ? shape[1] : 1;
+            } else if (shape.size() == 4) {
+                row = shape[0];
+                col = shape[1] * shape[2] * shape[3];
+            } else {
+                std::cout << "dump_f16_gpu_memory doesn't support shape size: " << shape.size() << std::endl;
+                return;
+            }
+        }
+        std::cout << ", row = " << row << ", col = " << col << ":\n";
+
+        std::vector<uint16_t> buf(row * col);
+        mem->copy_to(stream, buf.data(), 0, 0, buf.size() * sizeof(uint16_t), true);
+
+        for (size_t j = 0; j < row; j++) {
+            for (size_t i = 0; i < col; i++) {
+                std::cout << fp16_to_fp32(buf[j * col + i]) << ", ";
+                if (i % 32 == 31)
+                    std::cout << std::endl;
+            }
+            std::cout << std::endl;
+        }
+        std::cout << std::endl;
+    }
+
+    template <typename T>
+    void dump_gpu_memory(stream& stream, const memory::ptr& mem, const std::string& name, size_t m = 0, size_t n = 0) {
+        auto layout = mem->get_layout();
+        const auto& shape = layout.get_shape();
+        size_t row = m, col = n;
+
+        if (m == 0 || n == 0) {
+            if (shape.size() == 1) {
+                row = 1;
+                col = shape[0] > 0 ? shape[0] : 1;
+            } else if (shape.size() == 2) {
+                row = shape[0] > 0 ? shape[0] : 1;
+                col = shape[1] > 0 ? shape[1] : 1;
+            } else if (shape.size() == 4) {
+                row = shape[0];
+                col = shape[1] * shape[2] * shape[3];
+            } else {
+                std::cout << "dump_gpu_memory doesn't support shape size: " << shape.size() << std::endl;
+                return;
+            }
+        }
+
+        std::cout << "Dump GPU memory: " << name << ", layout: " << layout.to_short_string() << ", row = " << row << ", col = " << col << ":\n";
+        std::vector<T> buf(row * col);
+        mem->copy_to(stream, buf.data(), 0, 0, buf.size() * sizeof(T), true);
+
+        for (size_t j = 0; j < row; j++) {
+            for (size_t i = 0; i < col; i++) {
+                std::cout << static_cast<T>(buf[j * col + i]) << ", ";
+            }
+            std::cout << std::endl;
+        }
+        std::cout << std::endl;
+    }
+
+    void dump_u4_gpu_memory(stream& stream, const memory::ptr& mem, const std::string& name, size_t m = 0, size_t n = 0) {
+        auto layout = mem->get_layout();
+        if (layout.data_type != cldnn::data_types::u4) {
+            std::cout << "Memory " << name << " is not of u4 type." << std::endl;
+            return;
+        }
+        const auto& shape = layout.get_shape();
+        size_t row = m, col = n;
+        if (m == 0 || n == 0) {
+            if (shape.size() == 1) {
+                row = 1;
+                col = shape[0] > 0 ? shape[0] : 1;
+            } else if (shape.size() == 2) {
+                row = shape[0] > 0 ? shape[0] : 1;
+                col = shape[1] > 0 ? shape[1] : 1;
+            } else if (shape.size() == 4) {
+                row = shape[0];
+                col = shape[1] * shape[2] * shape[3];
+            } else {
+                std::cout << "dump_u4_gpu_memory doesn't support shape size: " << shape.size() << std::endl;
+                return;
+            }
+        }
+
+        col = col / 2;
+        std::cout << "Dump GPU memory: " << name << ", layout: " << layout.to_short_string() << ", row = " << row << ", col = " << col << ":\n";
+        std::vector<uint8_t> buf(row * col);
+        mem->copy_to(stream, buf.data(), 0, 0, buf.size() * sizeof(uint8_t), true);
+
+        for (size_t j = 0; j < row; j++) {
+            for (size_t i = 0; i < col; i++) {
+                uint8_t value = static_cast<uint8_t>(buf[j * col + i]);
+                std::cout << static_cast<uint32_t>(value & 0xF) << ", " << static_cast<uint32_t>(value >> 4) << ", ";
+            }
+            std::cout << std::endl;
+        }
+        std::cout << std::endl;
+    }
+#    else
+    void dump_fp16_gpu_memory(stream& stream, const memory::ptr& mem, const std::string& name, size_t m = 0, size_t n = 0) {}
+    template <typename T>
+    void dump_gpu_memory(stream& stream, const memory::ptr& mem, const std::string& name, size_t m = 0, size_t n = 0) {}
+    void dump_u4_gpu_memory(stream& stream, const memory::ptr& mem, const std::string& name, size_t m = 0, size_t n = 0) {}
+#    endif
+
 
     void load(BinaryInputBuffer& ib) override {
         PrimitiveImplOCL::load(ib);
@@ -674,7 +921,7 @@ public:
 
         std::vector<BufferDescriptor> internal_buffers;
         // softmax+topk
-        layout layout_topk_id(ov::PartialShape{batch, max_topk}, data_types::u32, cldnn::format::bfyx);
+        layout layout_topk_id(ov::PartialShape{batch, max_topk}, ov::element::i32, cldnn::format::bfyx);
         layout layout_topk_weights(ov::PartialShape{batch, max_topk}, data_type, cldnn::format::bfyx);
         internal_buffers.emplace_back(layout_topk_id, true);       // 0: topk_id
         internal_buffers.emplace_back(layout_topk_weights, true);  // 1: topk_weights
@@ -688,35 +935,116 @@ public:
         //         scratch.gate = gate(scratch.x) * scratch.up
         //         scratch.y = down(scratch.gate) * routing_weights
         internal_buffers.emplace_back(layout_down_out, true);  // 4: x, scratch.x has same layout with down output
-        layout routing_layout(ov::PartialShape{batch * max_topk}, data_type, cldnn::format::bfyx);
-        internal_buffers.emplace_back(routing_layout, true);     // 5: routing_weights
+        layout routing_layout(ov::PartialShape{batch, max_topk}, data_type, cldnn::format::bfyx);
+        // internal_buffers.emplace_back(routing_layout, true);     // 5: routing_weights
+        internal_buffers.emplace_back(layout_down_out, true);     // 5: routing_weights
         internal_buffers.emplace_back(layout_gateup_out, true);  // 6: gate, scratch.gate has same layout with up
+
+        // update 3 zp data
+        layout layout_zp(
+            ov::PartialShape{static_cast<int>(expert_num), static_cast<int>(config.hidden_size / config.group_size), static_cast<int>(config.inter_size)},
+            ov::element::u4,
+            cldnn::format::bfyx);
+        internal_buffers.emplace_back(layout_zp, true);  // 7: zp_0
+        internal_buffers.emplace_back(layout_zp, true);  // 8: zp_1
+        layout layout_zp_down(
+            ov::PartialShape{static_cast<int>(expert_num), static_cast<int>(config.inter_size / config.group_size), static_cast<int>(config.hidden_size)},
+            ov::element::u4,
+            cldnn::format::bfyx);
+        internal_buffers.emplace_back(layout_zp_down, true);  // 9: zp_2
+
+        layout layout_scale(
+            ov::PartialShape{static_cast<int>(expert_num), static_cast<int>(config.hidden_size / config.group_size), static_cast<int>(config.inter_size)},
+            ov::element::f16,
+            cldnn::format::bfyx);
+        internal_buffers.emplace_back(layout_scale, true);  // 10: scale_0
+        internal_buffers.emplace_back(layout_scale, true);  // 11: scale_1
+        layout layout_scale_down(
+            ov::PartialShape{static_cast<int>(expert_num), static_cast<int>(config.inter_size / config.group_size), static_cast<int>(config.hidden_size)},
+            ov::element::f16,
+            cldnn::format::bfyx);
+        internal_buffers.emplace_back(layout_scale_down, true);  // 12: scale_2
+
         // expert masks for gpu
         layout index_layout(ov::PartialShape{batch}, ov::element::i32, cldnn::format::bfyx);
         for (int i = 0; i < expert_num; i++) {
-            internal_buffers.emplace_back(index_layout, true);  // 7: batch
-            internal_buffers.emplace_back(index_layout, true);  // 8: topk
+            internal_buffers.emplace_back(index_layout, true);  // 13: batch
+            internal_buffers.emplace_back(index_layout, true);  // 14: topk
         }
 
         return internal_buffers;
     }
 
+    #if REPACK_SCALE_ZP
+    void repack_zp(typed_primitive_inst<moe_fused_compressed>& instance, const memory::ptr& mem_src, memory::ptr& mem_dst) {
+        auto& cur_net = instance.get_network();
+        auto& stream = cur_net.get_stream();
+
+        auto layout = mem_src->get_layout();
+        const auto& shape = layout.get_shape();
+        // std::cout << "zp layout: " << layout.to_short_string() << std::endl;
+
+        auto size_in_bytes = layout.bytes_count();
+        std::vector<uint8_t> src_buf(size_in_bytes);
+        std::vector<uint8_t> dst_buf(size_in_bytes);
+        mem_src->copy_to(stream, src_buf.data(), 0, 0, src_buf.size() * sizeof(uint8_t), true);
+        for(size_t b = 0; b < shape[0]; b++) { // expert_num
+            size_t base_idx = b * shape[1] * shape[2] / 2;
+            for (size_t f = 0; f < shape[1]; f += 2) { // hidden_size
+                for (size_t y = 0; y < shape[2]; y += 2) { // inter_size/group_size
+                    uint8_t src1 = src_buf[base_idx + f       * shape[2]/2 + y / 2];
+                    uint8_t src2 = src_buf[base_idx + (f + 1) * shape[2]/2 + y / 2];
+                    dst_buf[base_idx + y       * shape[1]/2 + f / 2] = (src1 & 0x0F) | ((src2 & 0x0F) << 4);
+                    dst_buf[base_idx + (y + 1) * shape[1]/2 + f / 2] = ((src1 >> 4) & 0x0F) | (((src2 >> 4) & 0x0F) << 4);
+                }
+            }
+        }
+        mem_lock<uint8_t, mem_lock_type::write> lock_data{mem_dst, stream};
+        memcpy(lock_data.data(), dst_buf.data(), size_in_bytes);
+    }
+
+    void repack_scale(typed_primitive_inst<moe_fused_compressed>& instance, const memory::ptr& mem_src, memory::ptr& mem_dst) {
+        auto& cur_net = instance.get_network();
+        auto& stream = cur_net.get_stream();
+
+        auto layout = mem_src->get_layout();
+        const auto& shape = layout.get_shape();
+        // std::cout << "scale layout: " << layout.to_short_string() << std::endl;
+
+        auto size_in_bytes = layout.bytes_count();
+        std::vector<uint16_t> src_buf(size_in_bytes/2);
+        std::vector<uint16_t> dst_buf(size_in_bytes/2);
+        mem_src->copy_to(stream, src_buf.data(), 0, 0, src_buf.size() * sizeof(uint16_t), true);
+        for(size_t b = 0; b < shape[0]; b++) { // expert_num
+            size_t base_idx = b * shape[1] * shape[2];
+            for (size_t f = 0; f < shape[1]; f ++) { // hidden_size
+                for (size_t y = 0; y < shape[2]; y ++) { // inter_size/group_size
+                    uint16_t src1 = src_buf[base_idx + f * shape[2] + y];
+                    dst_buf[base_idx + y * shape[1] + f] = src1;
+                }
+            }
+        }
+        mem_lock<uint16_t, mem_lock_type::write> lock_data{mem_dst, stream};
+        memcpy(lock_data.data(), dst_buf.data(), size_in_bytes);
+    }
+    #endif
+
     void prepare_internal_buffers(typed_primitive_inst<moe_fused_compressed>& instance, scratch_buffers& scratch, bool is_single_batch) {
         const auto& intermediates_memories = instance.get_intermediates_memories();
         scratch.topk_id = intermediates_memories[0];
         scratch.topk_weights = intermediates_memories[1];
-        scratch.up = intermediates_memories[2];
-        scratch.y = intermediates_memories[3];
+        scratch.up = intermediates_memories[2];   // up_output 
+        scratch.y = intermediates_memories[3];    // down_output
         if (!is_single_batch) {
-            scratch.x = intermediates_memories[4];
-            scratch.routing_weights = intermediates_memories[5];
-            scratch.gate = intermediates_memories[6];
+            scratch.x = intermediates_memories[4];    // input for each expert
+            scratch.routing_weights = intermediates_memories[5];   // router weight for current expert
+            scratch.gate = intermediates_memories[6]; // gate output
             const auto& config = instance.get_typed_desc<moe_fused_compressed>()->_config;
             int expert_num = static_cast<int>(config.num_expert);
             scratch.expert_masks.resize(expert_num);
             for (int i = 0; i < expert_num; i++) {
-                scratch.expert_masks[i].batch = intermediates_memories[7 + 2 * i + 0];
-                scratch.expert_masks[i].topk = intermediates_memories[7 + 2 * i + 1];
+                scratch.expert_masks[i].batch = intermediates_memories[13 + 2 * i + 0];
+                scratch.expert_masks[i].topk = intermediates_memories[13 + 2 * i + 1];
             }
         }
 
@@ -725,15 +1053,47 @@ public:
         scratch.moe_fusion_wei_addr.scale[0] = instance.input_memory_ptr(static_cast<size_t>(MOEInputIndex::SCALE_0));
         scratch.moe_fusion_wei_addr.zp[0] = instance.input_memory_ptr(static_cast<size_t>(MOEInputIndex::ZP_0));
 
+        // repack zp data
+        #if REPACK_SCALE_ZP
+            auto zp0_mem = intermediates_memories[7];
+            repack_zp(instance, scratch.moe_fusion_wei_addr.zp[0], zp0_mem);
+            scratch.moe_fusion_wei_addr.zp[0] = zp0_mem;
+
+            auto scale0_mem = intermediates_memories[10];
+            repack_scale(instance, scratch.moe_fusion_wei_addr.scale[0], scale0_mem);
+            scratch.moe_fusion_wei_addr.scale[0] = scale0_mem;
+        #endif
+
         // up
         scratch.moe_fusion_wei_addr.weight[1] = instance.input_memory_ptr(static_cast<size_t>(MOEInputIndex::WEIGHT_1));
         scratch.moe_fusion_wei_addr.scale[1] = instance.input_memory_ptr(static_cast<size_t>(MOEInputIndex::SCALE_1));
         scratch.moe_fusion_wei_addr.zp[1] = instance.input_memory_ptr(static_cast<size_t>(MOEInputIndex::ZP_1));
 
+        // repack zp data
+        #if REPACK_SCALE_ZP
+            auto zp1_mem = intermediates_memories[8];
+            repack_zp(instance, scratch.moe_fusion_wei_addr.zp[1], zp1_mem);
+            scratch.moe_fusion_wei_addr.zp[1] = zp1_mem;
+
+            auto scale1_mem = intermediates_memories[11];
+            repack_scale(instance, scratch.moe_fusion_wei_addr.scale[1], scale1_mem);
+            scratch.moe_fusion_wei_addr.scale[1] = scale1_mem;
+        #endif
+
         // down
         scratch.moe_fusion_wei_addr.weight[2] = instance.input_memory_ptr(static_cast<size_t>(MOEInputIndex::WEIGHT_2));
         scratch.moe_fusion_wei_addr.scale[2] = instance.input_memory_ptr(static_cast<size_t>(MOEInputIndex::SCALE_2));
         scratch.moe_fusion_wei_addr.zp[2] = instance.input_memory_ptr(static_cast<size_t>(MOEInputIndex::ZP_2));
+
+        #if REPACK_SCALE_ZP
+            auto zp2_mem = intermediates_memories[9];
+            repack_zp(instance, scratch.moe_fusion_wei_addr.zp[2], zp2_mem);
+            scratch.moe_fusion_wei_addr.zp[2] = zp2_mem;
+
+            auto scale2_mem = intermediates_memories[12];
+            repack_scale(instance, scratch.moe_fusion_wei_addr.scale[2], scale2_mem);
+            scratch.moe_fusion_wei_addr.scale[2] = scale2_mem;
+        #endif
     }
 
     void get_expert_mask_from_gpu(const MOEFusedCompressed::Config& config, memory::ptr mem, stream& stream, expert_mask_cpu& expert_mask) {
@@ -764,6 +1124,27 @@ public:
                 expert_mask.pred_flag[expert_no] = 1;
             }
         }
+
+        {
+        #if ENABLE_DUMP_DATA
+            std::cout << "----------------- expert_mask_cpu------------------" << std::endl;
+            for(int expert_id = 0; expert_id < max_expert_num; expert_id++) {
+                std::cout << "expert[" << expert_id << "].batch = ";
+                for(size_t i = 0; i < expert_mask.batch[expert_id].size(); i ++)
+                    std::cout << expert_mask.batch[expert_id][i] << " ";
+                std::cout << std::endl;
+            }
+            std::cout << std::endl;
+            for(int expert_id = 0; expert_id < max_expert_num; expert_id++) {
+                std::cout << "expert[" << expert_id << "].topk = ";
+                for(size_t i = 0; i < expert_mask.topk[expert_id].size(); i ++)
+                    std::cout << expert_mask.topk[expert_id][i] << " ";
+                std::cout << std::endl;
+            }
+            std::cout << std::endl;
+        #endif
+        }
+
         {
             // check if the result is ok
             int count = 0;
@@ -786,15 +1167,29 @@ public:
         }
     }
 
-    void copy_expert_mask_to_gpu(stream& stream, const expert_mask_cpu& expert_mask, size_t expert_no, expert_mask_gpu& expert_mask_mem) {
+
+    void reset_expert_mask_to_gpu(stream& stream, const expert_mask_cpu& expert_mask, size_t expert_no, expert_mask_gpu& expert_mask_mem, int batch) {
+        {
+            mem_lock<int32_t, mem_lock_type::write> lock_data{expert_mask_mem.batch, stream};
+            memset(lock_data.data(),0, batch * sizeof(int));
+        }
+        {
+            mem_lock<int32_t, mem_lock_type::write> lock_data{expert_mask_mem.topk, stream};
+            memset(lock_data.data(),0, batch * sizeof(int));
+        }
+    }
+
+    void copy_expert_mask_to_gpu(stream& stream, const expert_mask_cpu& expert_mask, size_t expert_no, expert_mask_gpu& expert_mask_mem, int batch) {
         auto size = expert_mask.batch[expert_no].size() * sizeof(int);
 
         {
             mem_lock<int32_t, mem_lock_type::write> lock_data{expert_mask_mem.batch, stream};
+            memset(lock_data.data(),0, batch * sizeof(int));
             memcpy(lock_data.data(), expert_mask.batch[expert_no].data(), size);
         }
         {
             mem_lock<int32_t, mem_lock_type::write> lock_data{expert_mask_mem.topk, stream};
+            memset(lock_data.data(),0, batch * sizeof(int));
             memcpy(lock_data.data(), expert_mask.topk[expert_no].data(), size);
         }
     }
@@ -855,6 +1250,11 @@ public:
         const auto& mlp_gate_scale_mem = scratch.moe_fusion_wei_addr.scale[0];
         const auto& mlp_gate_zp_mem = scratch.moe_fusion_wei_addr.zp[0];
 
+        {
+            auto& cur_net = instance.get_network();
+            auto& stream = cur_net.get_stream();
+            dump_u4_gpu_memory(stream, mlp_gate_wei_mem, "decoding: expert_gate_wei", 1, 256);
+        }
         // up
         const auto& mlp_up_wei_mem = scratch.moe_fusion_wei_addr.weight[1];
         const auto& mlp_up_scale_mem = scratch.moe_fusion_wei_addr.scale[1];
@@ -956,6 +1356,10 @@ public:
                                            dnnl_weights[1].scale,
                                            dnnl_weights[1].zp);
 
+        dump_u4_gpu_memory(stream, dnnl_weights[1].weight_ptr, "expert_" + std::to_string(expert_no) + "_weight_1");
+        dump_fp16_gpu_memory(stream, dnnl_weights[1].scale_ptr, "expert_" + std::to_string(expert_no) + "_scale_1");
+        dump_u4_gpu_memory(stream, dnnl_weights[1].zp_ptr, "expert_" + std::to_string(expert_no) + "_zp_1");
+
         // down
         auto down_weight_layout_dt = convert_data_type(instance.input_memory_ptr(static_cast<size_t>(MOEInputIndex::WEIGHT_2))->get_layout().data_type);
         kernel->down = onednn_linear::create(dnn_stream.get_engine(),
@@ -1003,6 +1407,8 @@ public:
         scratch_buffers scratch;
         prepare_internal_buffers(instance, scratch, batch == 1);
 
+        dump_fp16_gpu_memory(stream, hidden_states_mem_ptr, "hidden_states_mem_ptr");
+
         // softmax+topk
         auto lws_size = cur_moe->_config.num_expert;
         auto topk_event = execute_stage(events,
@@ -1017,11 +1423,16 @@ public:
         // and we can apply optimal kernels against memory bound to improve performance.
         // It is very important for MoE's second token performance.
         if (batch == 1) {
+            dump_fp16_gpu_memory(stream, scratch.topk_weights, "decoding: scratch.topk_weights", batch, config.top_k);
+            dump_gpu_memory<uint32_t>(stream, scratch.topk_id, "decoding: scratch.topk_id", batch, config.top_k);
             return exec_single_batch(instance, scratch);
         }
 
+        dump_fp16_gpu_memory(stream, scratch.topk_weights, "prefilling: scratch.topk_weights", batch, config.top_k);
+        dump_gpu_memory<uint32_t>(stream, scratch.topk_id, "prefilling: scratch.topk_id", batch, config.top_k);
+
         auto& engine = instance.get_network().get_engine();
-        init_dnnl_weights(cur_moe, engine, scratch.moe_fusion_wei_addr);
+        init_dnnl_weights(cur_moe, engine, instance, scratch.moe_fusion_wei_addr);
         auto final_hidden_states_mem_ptr = instance.output_memory_ptr(0);
         auto final_hidden_states_layout = instance.get_output_layout(0);
 
@@ -1056,16 +1467,23 @@ public:
         for (size_t expert_no = 0; expert_no < config.num_expert; expert_no++) {
             OPENVINO_ASSERT(expert_no < expert_mask.pred_flag.size());
             auto can_skip_subgraph = !expert_mask.pred_flag[expert_no];
+            expert_mask_gpu& expert_mask_mem = scratch.expert_masks[expert_no];
+            reset_expert_mask_to_gpu(stream, expert_mask, expert_no, expert_mask_mem, batch);
             if (can_skip_subgraph) {
                 continue;
             }
             auto& dnnl_weights = _dnnl_weights[expert_no];
 
             // expert_mask
-            expert_mask_gpu& expert_mask_mem = scratch.expert_masks[expert_no];
-            copy_expert_mask_to_gpu(stream, expert_mask, expert_no, expert_mask_mem);
-
+            copy_expert_mask_to_gpu(stream, expert_mask, expert_no, expert_mask_mem, batch);
             auto n_token = static_cast<int>(expert_mask.batch[expert_no].size());
+
+            #if ENABLE_DUMP_DATA
+            std::cout << "---------------------------------------------- expert_no : " << expert_no << std::endl;
+            dump_gpu_memory<uint32_t>(stream, expert_mask_mem.batch, "expert_mask_mem.batch", 1, n_token);
+            dump_gpu_memory<uint32_t>(stream, expert_mask_mem.topk, "expert_mask_mem.topk", 1, n_token);
+            #endif
+
             onednn_kernel& kernel = get_kernel(n_token, static_cast<int>(expert_no), instance);
 
             // gather
@@ -1077,12 +1495,16 @@ public:
                           {static_cast<size_t>(n_token), static_cast<size_t>(_hidden_size)},
                           {1, lws_size});
 
+            dump_fp16_gpu_memory(stream, scratch.x, "scratch.x");
+            dump_fp16_gpu_memory(stream, scratch.routing_weights, "scratch.routing_weights", 1, n_token);
+
             // up
             kernel.up.forward(dnn_stream,
                               n_token,
                               convert2dnnl(scratch.x, {static_cast<int>(n_token), dnnl_weights[1].ic}, dnnl::memory::format_tag::ab),
                               convert2dnnl(scratch.up, {static_cast<int>(n_token), _intermediate_size}, dnnl::memory::format_tag::ab),
                               dnnl::memory());
+            dump_fp16_gpu_memory(stream, scratch.up, "scratch.up_output");
 
             // gate
             kernel.gate.forward(dnn_stream,
@@ -1106,6 +1528,7 @@ public:
                                          {static_cast<size_t>(n_token), static_cast<size_t>(_hidden_size)},
                                          {1, lws_size},
                                          instance.needs_completion_event());
+            dump_fp16_gpu_memory(stream, final_hidden_states_mem_ptr, "final_hidden_states_mem_ptr");
         }
 
         return result_event;
@@ -1135,3 +1558,4 @@ std::unique_ptr<primitive_impl> MOEOpt::create_impl(const program_node& node, co
 }  // namespace ov::intel_gpu::ocl
 
 #endif
+
