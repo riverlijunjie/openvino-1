@@ -1,4 +1,4 @@
-// Copyright (C) 2025 Intel Corporation
+// Copyright (C) 2018-2026 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -941,14 +941,12 @@ public:
             dnnl_weights[2].ic_group_size = _down_group_size;
             dnnl_weights[2].oc = _hidden_size;
             for (int i = 0; i < 3; i++) {
-                // weight shape: [ic, oc], type: u4
-                // int64_t wei_offset = j * dnnl_weights[i].ic * dnnl_weights[i].oc / 2;
+                // weight shape: [ic, oc], type: u4/i8
                 int64_t wei_offset = j * get_bytes_count(dnnl_weights[i].ic * dnnl_weights[i].oc, moe_fusion_wei_addr.weight[i]->get_layout());
                 dnnl_weights[i].weight =
                     convert2dnnl(moe_fusion_wei_addr.weight[i], {dnnl_weights[i].ic, dnnl_weights[i].oc}, dnnl::memory::format_tag::ba, wei_offset);
 
                 // scale shape: [ic / ic_group_size, oc], type: f16
-                // int64_t scale_offset = j * dnnl_weights[i].ic * dnnl_weights[i].oc / dnnl_weights[i].ic_group_size * 2;
                 int64_t scale_offset =
                     j * get_bytes_count(dnnl_weights[i].ic * dnnl_weights[i].oc / dnnl_weights[i].ic_group_size, moe_fusion_wei_addr.scale[i]->get_layout());
                 dnnl_weights[i].scale = convert2dnnl(moe_fusion_wei_addr.scale[i],
@@ -956,8 +954,7 @@ public:
                                                      dnnl::memory::format_tag::ab,
                                                      scale_offset);
 
-                // zp shape: [ic / ic_group_size, oc], type: u4
-                // int64_t zp_offset = j * dnnl_weights[i].ic * dnnl_weights[i].oc / dnnl_weights[i].ic_group_size / 2;
+                // zp shape: [ic / ic_group_size, oc], type: u4/i8
                 int64_t zp_offset =
                     j * get_bytes_count(dnnl_weights[i].ic * dnnl_weights[i].oc / dnnl_weights[i].ic_group_size, moe_fusion_wei_addr.zp[i]->get_layout());
                 dnnl_weights[i].zp = convert2dnnl(moe_fusion_wei_addr.zp[i],
@@ -1011,8 +1008,7 @@ public:
         //         scratch.up = up(scratch.x)
         //         scratch.gate = gate(scratch.x) * scratch.up
         //         scratch.y = down(scratch.gate) * routing_weights
-        layout layout_gateup_in(ov::Shape{max_batch, static_cast<size_t>(config.hidden_size)}, data_type, cldnn::format::bfyx);
-        internal_buffers.emplace_back(layout_gateup_in, true);  // 4: up/gate input, scratch.x has same layout with down output
+        internal_buffers.emplace_back(layout_down_out, true);  // 4: up/gate input, scratch.x has same layout with down output
         layout routing_layout(ov::Shape{token_num * max_topk}, data_type, cldnn::format::bfyx);
         internal_buffers.emplace_back(routing_layout, true);     // 5: routing_weights
         internal_buffers.emplace_back(layout_gateup_out, true);  // 6: gate output, scratch.gate has same layout with up
@@ -1430,7 +1426,7 @@ public:
             cldnn::mem_lock<int32_t, mem_lock_type::read> num_actual_experts_lock(intermediates_memories[MOE_INTERNAL_BUFFER_ACTUAL_USED_EXPERT_NUM], stream);
             rtp->num_actually_used_experts = num_actual_experts_lock[0];
 #    if DEBUG_MOE_LOG
-            std::cout << "Step 1: mask gen by gpu, num_actually_used_experts = " << rtp->num_actually_used_experts << std::endl;
+            GPU_DEBUG_TRACE_DETAIL << "Step 1: mask gen by gpu, num_actually_used_experts = " << rtp->num_actually_used_experts << std::endl;
 #    endif
         } else {
             ret_event = events.empty() ? nullptr : events[0];
@@ -1494,33 +1490,33 @@ public:
 
 #    if DEBUG_MOE_LOG
             {
-                std::cout << "\nstep 1: prefill_mask num_actually_used_experts=" << num_actually_used_experts << std::endl;
-                std::cout << "expert_id[" << num_actually_used_experts << "]: = ";
+                GPU_DEBUG_TRACE_DETAIL << "\nstep 1: prefill_mask num_actually_used_experts=" << num_actually_used_experts << std::endl;
+                GPU_DEBUG_TRACE_DETAIL << "expert_id[" << num_actually_used_experts << "]: = ";
                 for (int i = 0; i < num_actually_used_experts; i++) {
-                    std::cout << experts_id_cpu[i] << ", ";
+                    GPU_DEBUG_TRACE_DETAIL << experts_id_cpu[i] << ", ";
                 }
-                std::cout << std::endl;
-                std::cout << "experts_info_start_idx[" << num_actually_used_experts << "]: = ";
+                GPU_DEBUG_TRACE_DETAIL << std::endl;
+                GPU_DEBUG_TRACE_DETAIL << "experts_info_start_idx[" << num_actually_used_experts << "]: = ";
                 for (int i = 0; i < num_actually_used_experts; i++) {
-                    std::cout << experts_info_start_idx_cpu[i] << ", ";
+                    GPU_DEBUG_TRACE_DETAIL << experts_info_start_idx_cpu[i] << ", ";
                 }
-                std::cout << std::endl;
-                std::cout << "tokens_len_per_expert[" << num_actually_used_experts << "]: = ";
+                GPU_DEBUG_TRACE_DETAIL << std::endl;
+                GPU_DEBUG_TRACE_DETAIL << "tokens_len_per_expert[" << num_actually_used_experts << "]: = ";
                 for (int i = 0; i < num_actually_used_experts; i++) {
-                    std::cout << tokens_lens_per_expert_cpu[i] << ", ";
+                    GPU_DEBUG_TRACE_DETAIL << tokens_lens_per_expert_cpu[i] << ", ";
                 }
-                std::cout << std::endl;
-                std::cout << "tokens_per_expert[" << num_actually_used_experts << "]:" << std::endl;
+                GPU_DEBUG_TRACE_DETAIL << std::endl;
+                GPU_DEBUG_TRACE_DETAIL << "tokens_per_expert[" << num_actually_used_experts << "]:" << std::endl;
                 int token_idx = 0;
                 for (int i = 0; i < num_actually_used_experts; i++) {
-                    std::cout << "\texpert[" << experts_id_cpu[i] << "] = (" << tokens_lens_per_expert_cpu[i] << ") -";
+                    GPU_DEBUG_TRACE_DETAIL << "\texpert[" << experts_id_cpu[i] << "] = (" << tokens_lens_per_expert_cpu[i] << ") -";
                     for (int j = 0; j < tokens_lens_per_expert_cpu[i]; j++) {
-                        std::cout << tokens_per_expert_cpu[token_idx + j] << ", ";
+                        GPU_DEBUG_TRACE_DETAIL << tokens_per_expert_cpu[token_idx + j] << ", ";
                     }
                     token_idx += tokens_lens_per_expert_cpu[i];
-                    std::cout << std::endl;
+                    GPU_DEBUG_TRACE_DETAIL << std::endl;
                 }
-                std::cout << std::endl;
+                GPU_DEBUG_TRACE_DETAIL << std::endl;
             }
 #    endif
         }
@@ -1539,9 +1535,9 @@ public:
             auto token_per_expert = intermediates_memories[MOE_INTERNAL_BUFFER_TOKEN_IDX_PER_EXPERT]->get_layout().get_shape()[0];
 
 #    if DEBUG_MOE_LOG
-            std::cout << "\nstep 2: prefill_gather local_threads_count=" << local_threads_count << ", batches_per_thread=" << batches_per_thread
-                      << ", unaligned_elements=" << unaligned_elements << ", token_per_expert=" << token_per_expert << ", block_size = " << block_size
-                      << std::endl;
+            GPU_DEBUG_TRACE_DETAIL << "\nstep 2: prefill_gather local_threads_count=" << local_threads_count << ", batches_per_thread=" << batches_per_thread
+                                   << ", unaligned_elements=" << unaligned_elements << ", token_per_expert=" << token_per_expert
+                                   << ", block_size = " << block_size << std::endl;
 #    endif
             ret_event = execute_stage({ret_event},
                                       instance,
@@ -1577,7 +1573,7 @@ public:
         //      0: up/gate output, shape = [token_len * expert_topK, hidden_size]
         {
 #    if DEBUG_MOE_LOG
-            std::cout << "\nstep 3: moe_gemm for up and gate" << std::endl;
+            GPU_DEBUG_TRACE_DETAIL << "\nstep 3: moe_gemm for up and gate" << std::endl;
 #    endif
             ret_event = PrimitiveImplOCL::execute_stage({ret_event}, instance, micro_gemm_up);
 #    if DUMP_TENSOR_CONTENTS
@@ -1617,7 +1613,7 @@ public:
         {
             auto token_size = token_num * max_topk;
 #    if DEBUG_MOE_LOG
-            std::cout << "\nstep 4: prefill_swiglu token_size=" << token_size << ", hidden_size=" << _intermediate_size << std::endl;
+            GPU_DEBUG_TRACE_DETAIL << "\nstep 4: prefill_swiglu token_size=" << token_size << ", hidden_size=" << _intermediate_size << std::endl;
 #    endif
             ret_event = execute_stage({ret_event},
                                       instance,
@@ -1651,7 +1647,7 @@ public:
         //      0: down output, shape = [token_len * expert_topK, hidden_size]
         {
 #    if DEBUG_MOE_LOG
-            std::cout << "\nstep 5: moe_gemm for down" << std::endl;
+            GPU_DEBUG_TRACE_DETAIL << "\nstep 5: moe_gemm for down" << std::endl;
 #    endif
             ret_event = PrimitiveImplOCL::execute_stage({ret_event}, instance, micro_gemm_down);
 #    if DUMP_TENSOR_CONTENTS
@@ -1683,8 +1679,8 @@ public:
             auto [local_threads_count, batches_per_thread, _] = calc_thread_count(const_cast<RuntimeParams&>(*instance.get_impl_params()), 4, _hidden_size);
 
 #    if DEBUG_MOE_LOG
-            std::cout << "\nstep 6: prefill_scatter_reduce token_size=" << token_size << ", local_threads_count=" << local_threads_count
-                      << ", num_actually_used_experts = " << num_actually_used_experts << std::endl;
+            GPU_DEBUG_TRACE_DETAIL << "\nstep 6: prefill_scatter_reduce token_size=" << token_size << ", local_threads_count=" << local_threads_count
+                                   << ", num_actually_used_experts = " << num_actually_used_experts << std::endl;
 #    endif
 
             ret_event = execute_stage({ret_event},

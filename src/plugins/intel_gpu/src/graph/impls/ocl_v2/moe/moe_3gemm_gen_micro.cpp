@@ -1,4 +1,4 @@
-// Copyright (C) 2025 Intel Corporation
+// Copyright (C) 2018-2026 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -56,7 +56,7 @@ JitConstants MoE3GemmMicroGenerator::get_jit_constants(const kernel_impl_params&
     GPU_DEBUG_TRACE_DETAIL << "\t m_wei_idx: " << m_wei_idx << std::endl;
     GPU_DEBUG_TRACE_DETAIL << "\t m_wei_idx.get_shape(): " << weight_layout.to_short_string() << std::endl;
     const auto& weight_shape = weight_layout.get_shape();
-    // weight layout: u4:bfyx:4x3072x8x128:nopad
+    // weight layout: u4/u8:bfyx:4x3072x8x128:nopad
     size_t expert_stride = weight_shape.size() == 4 ? (weight_shape[1] * weight_shape[2] * weight_shape[3]) : (weight_shape[1] * weight_shape[2]);
     if (weight_layout.data_type == ov::element::u4 || weight_layout.data_type == ov::element::i4) {
         jit.make("INPUT1_TYPE", to_ocl_type(data_types::u8));  // weight: u4/i4
@@ -256,7 +256,7 @@ void MoE3GemmMicroGenerator::init_microkernels(const kernel_impl_params& params,
 
     problem_moe.Tb = problem_moe.Tb_ext = micro::Type::f16;
     problem_moe.Tc = micro::Type::f32;
-    problem_moe.Tc_ext = micro::Type::f16;
+    problem_moe.Tc_ext = micro::Type::f32;
     problem_moe.Ts = problem_moe.Tc;
     problem_moe.A.layout = micro::MatrixLayout::T;
     problem_moe.B.layout = micro::MatrixLayout::N;
@@ -457,7 +457,7 @@ KernelData MoE3GemmMicroGenerator::get_kernel_data(const kernel_impl_params& par
     kd.params.local_memory_args.clear();
     if (slm_size > 0) {
         kd.params.local_memory_args.push_back(slm_size);
-        kd.params.arguments.push_back({ArgumentDescriptor::Types::LOCAL_MEMORY_SIZE, slm_size});
+        kd.params.arguments.push_back({ArgumentDescriptor::Types::LOCAL_MEMORY_SIZE, 0});
     }
 
     GPU_DEBUG_TRACE_DETAIL << "MoE3GemmMicroGenerator::get_kernel_data() completed\n";
