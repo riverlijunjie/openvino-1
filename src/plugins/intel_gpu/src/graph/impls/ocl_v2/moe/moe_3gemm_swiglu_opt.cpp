@@ -1620,8 +1620,8 @@ public:
                                       *prefill_swiglu,
                                       {intermediates_memories[MOE_INTERNAL_BUFFER_UP_OUTPUT], intermediates_memories[MOE_INTERNAL_BUFFER_GATE_OUTPUT]},
                                       {intermediates_memories[MOE_INTERNAL_BUFFER_GATE_OUTPUT]},
-                                      {static_cast<size_t>(token_size), static_cast<size_t>(_intermediate_size), 1},
-                                      {1, subgroup_size, 1});
+                                      {static_cast<size_t>(_intermediate_size), static_cast<size_t>(token_size),  1},
+                                      {subgroup_size, 1, 1});
 #    if DUMP_TENSOR_CONTENTS
             {
                 ret_event->wait();  // debug
