@@ -141,18 +141,18 @@ KERNEL(swiglu_ref) (
 ) {
     const uint token_idx = get_global_id(0);
     const uint n_offset = get_global_id(1);
-
     const uint offset = token_idx * INTERMEDIA_SIZE + n_offset;
+
 #if MOE_DTYPE_SIZE == 2
-    half up_value = as_half(intel_sub_group_block_read_us((const __global ushort *)(up + offset)));
-    half gate_value = as_half(intel_sub_group_block_read_us((const __global ushort *)(gate + offset)));
-    half value = gate_value / (1.0 + native_exp(-SWISH_BETA * gate_value));
-    MOE_DTYPE result = value * up_value;
+    float up_value = (float)as_half(intel_sub_group_block_read_us((const __global ushort *)(up + offset)));
+    float gate_value = (float)as_half(intel_sub_group_block_read_us((const __global ushort *)(gate + offset)));
+    float value = gate_value / (1.0f + native_exp(-SWISH_BETA * gate_value));
+    half result = (half)(value * up_value);
     intel_sub_group_block_write_us((__global ushort *)(output + offset), as_ushort(result));
 #else
     MOE_DTYPE gate_value = gate[offset];
     MOE_DTYPE up_value = up[offset];
-    half value = gate_value / (1.0 + native_exp(-SWISH_BETA * gate_value));
+    MOE_DTYPE value = gate_value / (1.0f + native_exp(-SWISH_BETA * gate_value));
     MOE_DTYPE result = value * up_value;
     output[offset] = result;
 #endif

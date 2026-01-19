@@ -150,21 +150,32 @@ void MoE3GemmMicroGenerator::init_microkernels(const kernel_impl_params& params,
     std::lock_guard<std::mutex> l(mtx);
 
     int wei_idx, scale_idx, zp_idx;
+    auto desc = params.typed_desc<moe_3gemm_fused_compressed>();
+    size_t group_size = desc->_config.group_size;
     switch (type) {
     case MoE3GemmMicroKernelType::MLP_GATE:
         wei_idx = static_cast<int>(MOE3GemmInputIndex::WEIGHT_0);
         scale_idx = static_cast<int>(MOE3GemmInputIndex::SCALE_0);
         zp_idx = static_cast<int>(MOE3GemmInputIndex::ZP_0);
+        if (group_size == std::numeric_limits<size_t>::max()) {
+            group_size = desc->_config.hidden_size;
+        }
         break;
     case MoE3GemmMicroKernelType::MLP_UP:
         wei_idx = static_cast<int>(MOE3GemmInputIndex::WEIGHT_1);
         scale_idx = static_cast<int>(MOE3GemmInputIndex::SCALE_1);
         zp_idx = static_cast<int>(MOE3GemmInputIndex::ZP_1);
+        if (group_size == std::numeric_limits<size_t>::max()) {
+            group_size = desc->_config.hidden_size;
+        }
         break;
     case MoE3GemmMicroKernelType::MLP_DOWN:
         wei_idx = static_cast<int>(MOE3GemmInputIndex::WEIGHT_2);
         scale_idx = static_cast<int>(MOE3GemmInputIndex::SCALE_2);
         zp_idx = static_cast<int>(MOE3GemmInputIndex::ZP_2);
+        if (group_size == std::numeric_limits<size_t>::max()) {
+            group_size = desc->_config.inter_size;
+        }
         break;
     default:
         OPENVINO_THROW("Unsupported MoE3GemmMicroKernelType");
@@ -204,8 +215,6 @@ void MoE3GemmMicroGenerator::init_microkernels(const kernel_impl_params& params,
 
     GPU_DEBUG_TRACE_DETAIL << "MoE3GemmMicroGenerator::init_microkernels: " << std::endl;
     GPU_DEBUG_TRACE_DETAIL << "\t m = " << m << ", n = " << n << ", k = " << k << std::endl;
-
-    size_t group_size = weight_shape.size() == 4 ? weight_shape[3] : weight_shape[2];
     GPU_DEBUG_TRACE_DETAIL << "\t weight group size: " << group_size << "\n";
 
     micro::GEMMProblem problem_moe;
@@ -247,7 +256,7 @@ void MoE3GemmMicroGenerator::init_microkernels(const kernel_impl_params& params,
 
     problem_moe.Tb = problem_moe.Tb_ext = micro::Type::f16;
     problem_moe.Tc = micro::Type::f32;
-    problem_moe.Tc_ext = micro::Type::f32;
+    problem_moe.Tc_ext = micro::Type::f16;
     problem_moe.Ts = problem_moe.Tc;
     problem_moe.A.layout = micro::MatrixLayout::T;
     problem_moe.B.layout = micro::MatrixLayout::N;
@@ -300,7 +309,19 @@ DispatchDataFunc MoE3GemmMicroGenerator::get_dispatch_data_func() const {
         GPU_DEBUG_TRACE_DETAIL << "\t experts_weight_layout: " << experts_weight_layout.to_short_string() << std::endl;
 
         // has_batch_dim indicates whether the input tensor has batch dimension
-        size_t n = input_layout.get_shape().size() == 3 ? input_layout.get_shape()[1] : input_layout.get_shape()[0];
+        size_t n = input_layout.get_shape()[0];
+        switch (input_layout.get_shape().size()) {
+        case 2:
+            n = input_layout.get_shape()[0];
+            break;
+        case 3:
+        case 4:
+            n = input_layout.get_shape()[0] * input_layout.get_shape()[1];
+            break;
+        default:
+            OPENVINO_THROW("Unsupported input tensor shape size: ", input_layout.get_shape().size());
+        }
+
         auto cur_moe = params.typed_desc<moe_3gemm_fused_compressed>();
         const auto& config = cur_moe->_config;
         n = n * config.top_k;
