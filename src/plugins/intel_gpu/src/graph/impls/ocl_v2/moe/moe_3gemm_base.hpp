@@ -25,6 +25,7 @@ namespace ov::intel_gpu::ocl {
 #define MOE_INTERNAL_BUFFER_TOKEN_LEN_PER_ACTIVATED_EXPERT 11  // token len (input gather tokens) for each activated expert
 #define MOE_INTERNAL_BUFFER_TOKEN_IDX_PER_EXPERT           12  // token idx per expert
 #define MOE_INTERNAL_BUFFER_ACTUAL_USED_EXPERT_NUM         13  // num_actual_used_experts
+#define MOE_INTERNAL_BUFFER_SORTED_ROUTING_WEIGHTS         14  // sorted routing weights
 
 #define ENABLE_MOE_3GEMM_MICRO_FUSE_SILU_MUL 1
 

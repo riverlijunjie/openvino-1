@@ -9,7 +9,12 @@
 #define INPUT_VEC_TYPE  MAKE_VECTOR_TYPE(INPUT0_TYPE, VEC_BLK_SIZE)
 #define OUTPUT_VEC_TYPE MAKE_VECTOR_TYPE(OUTPUT_TYPE, VEC_BLK_SIZE)
 
+#ifndef FUSE_MUL_WG
 #define ACC_TYPE float
+#else
+#define ACC_TYPE OUTPUT_TYPE
+#endif
+
 #define ACC_VEC_TYPE MAKE_VECTOR_TYPE(ACC_TYPE, VEC_BLK_SIZE)
 #define TO_ACC_VEC_TYPE CAT(convert_, ACC_VEC_TYPE)
 #define TO_OUTPUT_VEC_TYPE CAT(convert_, OUTPUT_VEC_TYPE)
@@ -99,10 +104,32 @@ KERNEL(moe_scatter_reduction_ref)(
         output_vec[i] = (ACC_VEC_TYPE)(0.0f);
     }
 
+    // Sort the processing order to match the reference implementation (Ascending Expert ID)
+    // start_offset_index maps the local TopK slot to the index in the global sorted Active Expert list.
+    // Iterating in ascending order of start_offset_index ensures we accumulate Expanded Expert results in Expert ID order.
+    uint private_start_indices[ACTIVE_EXPERTS];
     for (uint i = 0; i < ACTIVE_EXPERTS; i++) {
-        // Skip experts that were not matched
-        if (start_offset_index[i] == (uint)UINT_MAX)
-            continue;
+        private_start_indices[i] = start_offset_index[i];
+    }
+
+    for (uint step = 0; step < ACTIVE_EXPERTS; step++) {
+        // Find the next expert in the sorted order
+        uint min_val = (uint)UINT_MAX;
+        uint min_idx = (uint)UINT_MAX;
+
+        for (uint i = 0; i < ACTIVE_EXPERTS; i++) {
+            if (private_start_indices[i] < min_val) {
+                min_val = private_start_indices[i];
+                min_idx = i;
+            }
+        }
+
+        if (min_idx == (uint)UINT_MAX)
+            break;
+
+        // Mark as processed
+        private_start_indices[min_idx] = (uint)UINT_MAX;
+        uint i = min_idx;
 
         uint input_offset = expert_input_offsets[i];
 
@@ -110,13 +137,17 @@ KERNEL(moe_scatter_reduction_ref)(
         if (input_offset == (uint)UINT_MAX)
             continue;
 
+#ifndef FUSE_MUL_WG
         INPUT2_TYPE expert_weight = expert_weights[token_group_id * ACTIVE_EXPERTS  + i];
+#endif
 
         for (uint j = 0; j < BATCHES_PER_THREAD; j++) {
             const uint input_pos = input_offset * HIDDEN_SIZE + j * VEC_BLK_SIZE + threads_index * VEC_BLK_SIZE * BATCHES_PER_THREAD;
             INPUT_VEC_TYPE input_data = VLOAD(0, &input[input_pos]);
             ACC_VEC_TYPE input_acc = TO_ACC_VEC_TYPE(input_data);
+#ifndef FUSE_MUL_WG
             input_acc *= (ACC_TYPE)expert_weight;
+#endif
             output_vec[j] += input_acc;
         }
     }

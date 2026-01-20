@@ -514,6 +514,15 @@ protected:
         jit.make("OUTPUT_TYPE", "half");
         jit.make("OPTIONAL_SHAPE_INFO_ARG", "");
 
+        jit.make("OUTPUT_ROUTING_WEIGHTS", 1);
+        jit.make("TOP_K", desc->_config.top_k);
+        jit.make("SET_ACTUAL_USED_EXPERTS_NUM", 1);
+        jit.make("INPUT2_TYPE", "half"); // routing_weights
+        jit.make("OUTPUT2_TYPE", "half"); // sorted_routing_weights
+        jit.make("INPUT3_TYPE", "int"); // topk_ids
+        jit.make("INPUT4_TYPE", "int"); // expert_ids
+        jit.make("INPUT5_TYPE", "int"); // start_offsets
+
         GPU_DEBUG_TRACE_DETAIL << "MoE3GemmSwigluPrefillGather::get_jit_constants():  hidden_size: " << hidden_size << ", block_size: " << block_size
                                << ", local_threads_count: " << local_threads_count << ", batches_per_thread: " << batches_per_thread
                                << ", unaligned_elements: " << unaligned_elements << std::endl;
@@ -583,6 +592,7 @@ protected:
         jit.make("VEC_BLK_SIZE", 4);
         jit.make("BATCHES_PER_THREAD", batches_per_thread);
         jit.make("SET_ACTUAL_USED_EXPERTS_NUM", 1);
+        jit.make("FUSE_MUL_WG", 1);
 
         jit.make("INPUT0_TYPE", "half");  // mlp_down output
         jit.make("INPUT1_TYPE", "int");   // expert indices per token
@@ -1028,6 +1038,7 @@ public:
             internal_buffers.emplace_back(layout_token_idx, true);  // 12: token idx per expert
             layout layout_actual_used_expert_num(ov::Shape{1}, ov::element::i32, cldnn::format::bfyx);
             internal_buffers.emplace_back(layout_actual_used_expert_num, false);  // 13: actual_used_expert_num
+            internal_buffers.emplace_back(routing_layout, true);                  // 14: sorted routing weights
         }
         return internal_buffers;
     }
@@ -1043,6 +1054,9 @@ public:
             scratch.x = intermediates_memories[MOE_INTERNAL_BUFFER_GATE_UP_INPUT];
             scratch.routing_weights = intermediates_memories[MOE_INTERNAL_BUFFER_ROUTING_WEIGHTS];
             scratch.gate = intermediates_memories[MOE_INTERNAL_BUFFER_GATE_OUTPUT];
+            
+            // Add sorted routing weights mapping here if needed in scratch struct, or directly access via MOE_INTERNAL_BUFFER_SORTED_ROUTING_WEIGHTS
+            
             const auto& config = instance.get_typed_desc<moe_3gemm_fused_compressed>()->_config;
             int expert_num = static_cast<int>(config.num_expert);
             scratch.expert_masks.resize(expert_num);
@@ -1543,8 +1557,15 @@ public:
                                       instance,
                                       *prefill_gather,
                                       {instance.input_memory_ptr(static_cast<size_t>(MOE3GemmInputIndex::HIDDEN_STATES)),
-                                       intermediates_memories[MOE_INTERNAL_BUFFER_TOKEN_IDX_PER_EXPERT]},
-                                      {scratch.x},
+                                       intermediates_memories[MOE_INTERNAL_BUFFER_TOKEN_IDX_PER_EXPERT],
+                                       scratch.x,
+                                       scratch.topk_weights,
+                                       intermediates_memories[MOE_INTERNAL_BUFFER_SORTED_ROUTING_WEIGHTS],
+                                       scratch.topk_id,
+                                       intermediates_memories[MOE_INTERNAL_BUFFER_ACTIVATED_EXPERT_IDS],
+                                       intermediates_memories[MOE_INTERNAL_BUFFER_TOKEN_START_OFFSET_PER_EXPERT],
+                                       intermediates_memories[MOE_INTERNAL_BUFFER_ACTUAL_USED_EXPERT_NUM]},
+                                      {},
                                       {static_cast<size_t>(token_per_expert * local_threads_count), 1, 1},
                                       {static_cast<size_t>(local_threads_count), 1, 1});
 

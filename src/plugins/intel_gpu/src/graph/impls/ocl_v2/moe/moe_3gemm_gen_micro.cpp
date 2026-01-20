@@ -121,7 +121,11 @@ JitConstants MoE3GemmMicroGenerator::get_jit_constants(const kernel_impl_params&
 
     bool enable_silu_mul = ENABLE_MOE_3GEMM_MICRO_FUSE_SILU_MUL;  // TODO: Enable this based on config (e.g. cfg.fuse_swiglu)
     if (enable_silu_mul && m_type == MoE3GemmMicroKernelType::MLP_GATE)
-        jit.make("MOE_ENABLE_SILU_MUL", 1);
+        jit.make("MOE_MICRO_GEMM_POST_PROCESS_SILU_MUL", 1);
+
+    bool enable_down_mul = true; // TODO: Check config/env
+    if (enable_down_mul && m_type == MoE3GemmMicroKernelType::MLP_DOWN)
+        jit.make("MOE_MICRO_GEMM_POST_PROCESS_MUL", 1);
 
     return jit;
 }
@@ -398,6 +402,10 @@ Arguments MoE3GemmMicroGenerator::get_arguments_desc(const kernel_impl_params& p
         args.push_back({ArgumentDescriptor::Types::INTERNAL_BUFFER, MOE_INTERNAL_BUFFER_GATE_OUTPUT});  // intermediate_mem[6]
         args.push_back({ArgumentDescriptor::Types::INPUT, static_cast<int>(MOE3GemmInputIndex::WEIGHT_2)});
         args.push_back({ArgumentDescriptor::Types::INTERNAL_BUFFER, MOE_INTERNAL_BUFFER_DOWN_OUTPUT});                     // down output
+        {
+             bool enable_down_mul = true; // TODO: Enable based on config
+             if (enable_down_mul) args.push_back({ArgumentDescriptor::Types::INTERNAL_BUFFER, MOE_INTERNAL_BUFFER_SORTED_ROUTING_WEIGHTS});
+        }
         args.push_back({ArgumentDescriptor::Types::INTERNAL_BUFFER, MOE_INTERNAL_BUFFER_ACTIVATED_EXPERT_IDS});            // experts_ids
         args.push_back({ArgumentDescriptor::Types::INTERNAL_BUFFER, MOE_INTERNAL_BUFFER_TOKEN_START_OFFSET_PER_EXPERT});   // input_offset_per_expert
         args.push_back({ArgumentDescriptor::Types::INTERNAL_BUFFER, MOE_INTERNAL_BUFFER_TOKEN_LEN_PER_ACTIVATED_EXPERT});  // n_array - token len
