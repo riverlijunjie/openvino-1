@@ -7,8 +7,10 @@
 #include "moe_3gemm_swiglu_opt.hpp"
 // clang-format on
 
-#define DEBUG_MOE_LOG 0
-#define DUMP_TENSOR_CONTENTS 0
+#define DEBUG_MOE_LOG 1
+#define DUMP_TENSOR_CONTENTS 1
+#include <string>
+#include <iostream>
 
 #ifdef ENABLE_ONEDNN_FOR_GPU
 #    include <initializer_list>
@@ -522,6 +524,7 @@ protected:
         jit.make("INPUT3_TYPE", "int"); // topk_ids
         jit.make("INPUT4_TYPE", "int"); // expert_ids
         jit.make("INPUT5_TYPE", "int"); // start_offsets
+        jit.make("INPUT6_TYPE", "int"); // token_len
 
         GPU_DEBUG_TRACE_DETAIL << "MoE3GemmSwigluPrefillGather::get_jit_constants():  hidden_size: " << hidden_size << ", block_size: " << block_size
                                << ", local_threads_count: " << local_threads_count << ", batches_per_thread: " << batches_per_thread
@@ -1214,7 +1217,7 @@ public:
     }
 
 #    if DUMP_TENSOR_CONTENTS
-    void print_mem_f16(cldnn::stream& stream, memory::ptr mem, const std::string& mem_name, size_t max_row = 50) {
+    void print_mem_f16(cldnn::stream& stream, memory::ptr mem, const std::string& mem_name, size_t max_row = 256) {
         auto layout = mem->get_layout().get_shape();
         size_t row = 0;
         size_t col = 0;
@@ -1251,6 +1254,52 @@ public:
             std::cout << std::endl;
         }
         std::cout << std::endl;
+    };
+
+    void save_mem_f16(cldnn::stream& stream, memory::ptr mem, const std::string file_name) {
+        auto layout = mem->get_layout().get_shape();
+        size_t row = 0;
+        size_t col = 0;
+
+        return;
+
+        switch (layout.size()) {
+        case 1:
+            row = 1;
+            col = layout[0];
+            break;
+        case 2:
+            row = layout[0];
+            col = layout[1];
+            break;
+        case 3:
+            row = layout[0] * layout[1];
+            col = layout[2];
+            break;
+        case 4:
+            row = layout[0] * layout[1] * layout[2];
+            col = layout[3];
+            break;
+        default:
+            OPENVINO_THROW("print_mem_f16 not support layout size ", layout.size());
+        }
+
+        cldnn::mem_lock<uint16_t, mem_lock_type::read> lock_data{mem, stream};
+        std::ofstream outFile(file_name);
+        if (!outFile.is_open()) {
+            std::cerr << "Error: Could not open file " << file_name << " for writing." << std::endl;
+            return;
+        }
+        outFile.precision(10); // Set precision for floating-point output
+        for (size_t j = 0; j < row; j++) {
+            outFile << "\t[" << j << "]: ";
+            for (size_t i = 0; i < col; i++) {
+                ov::float16 v = ov::float16::from_bits(lock_data[j * col + i]);
+                outFile << static_cast<float>(v) << ", ";
+            }
+            outFile << std::endl;
+        }
+        outFile.close();
     };
 
     void print_mem_u4(cldnn::stream& stream, memory::ptr mem, const std::string& mem_name, size_t max_row = 50) {
@@ -1410,6 +1459,10 @@ public:
         auto num_total_experts = static_cast<int>(cur_moe->_config.num_expert);
         int num_actually_used_experts = 0;
 
+#    if DUMP_TENSOR_CONTENTS
+        static int dump_cnt = 0;
+        dump_cnt++;
+#endif
         // step 1: generate 4 mask data for following kernel execution
         // input: topk output, [token_len, expert_topk]
         // output:
@@ -1501,7 +1554,6 @@ public:
         }
 #    endif
 
-
 #    if DEBUG_MOE_LOG
             {
                 GPU_DEBUG_TRACE_DETAIL << "\nstep 1: prefill_mask num_actually_used_experts=" << num_actually_used_experts << std::endl;
@@ -1564,6 +1616,7 @@ public:
                                        scratch.topk_id,
                                        intermediates_memories[MOE_INTERNAL_BUFFER_ACTIVATED_EXPERT_IDS],
                                        intermediates_memories[MOE_INTERNAL_BUFFER_TOKEN_START_OFFSET_PER_EXPERT],
+                                       intermediates_memories[MOE_INTERNAL_BUFFER_TOKEN_LEN_PER_ACTIVATED_EXPERT],
                                        intermediates_memories[MOE_INTERNAL_BUFFER_ACTUAL_USED_EXPERT_NUM]},
                                       {},
                                       {static_cast<size_t>(token_per_expert * local_threads_count), 1, 1},
@@ -1608,6 +1661,7 @@ public:
                 //           num_actually_used_experts);
                 // print_mem(stream, intermediates_memories[MOE_INTERNAL_BUFFER_TOKEN_LEN_PER_ACTIVATED_EXPERT], "token_len", num_actually_used_experts);
                 print_mem_f16(stream, intermediates_memories[MOE_INTERNAL_BUFFER_UP_OUTPUT], "up_output");
+                save_mem_f16(stream, intermediates_memories[MOE_INTERNAL_BUFFER_UP_OUTPUT], "micro_up_output_" + std::to_string(dump_cnt) + ".txt");
             }
 #    endif
             ret_event = PrimitiveImplOCL::execute_stage({ret_event}, instance, micro_gemm_gate);
@@ -1621,6 +1675,7 @@ public:
                 // num_actually_used_experts); print_mem(stream, intermediates_memories[MOE_INTERNAL_BUFFER_TOKEN_LEN_PER_ACTIVATED_EXPERT],
                 // "gate_token_len", num_actually_used_experts);
                 print_mem_f16(stream, intermediates_memories[MOE_INTERNAL_BUFFER_GATE_OUTPUT], "gate_output");
+                save_mem_f16(stream, intermediates_memories[MOE_INTERNAL_BUFFER_GATE_OUTPUT], "micro_gate_output_" + std::to_string(dump_cnt) + ".txt");
             }
 #    endif
         }
@@ -1680,6 +1735,7 @@ public:
                 // num_actually_used_experts); print_mem(stream, intermediates_memories[MOE_INTERNAL_BUFFER_TOKEN_LEN_PER_ACTIVATED_EXPERT],
                 // "down_token_len", num_actually_used_experts);
                 print_mem_f16(stream, intermediates_memories[MOE_INTERNAL_BUFFER_DOWN_OUTPUT], "down_output");
+                save_mem_f16(stream, intermediates_memories[MOE_INTERNAL_BUFFER_DOWN_OUTPUT], "micro_down_output_" + std::to_string(dump_cnt) + ".txt");
             }
 #    endif
         }
@@ -1735,6 +1791,7 @@ public:
                 //           num_actually_used_experts);
                 // print_mem(stream, intermediates_memories[MOE_INTERNAL_BUFFER_ACTIVATED_EXPERT_IDS], "scatter_reduce_expert_id", num_actually_used_experts);
                 print_mem_f16(stream, final_hidden_states_mem_ptr, "final_hidden_states");
+                save_mem_f16(stream, final_hidden_states_mem_ptr, "micro_final_hidden_states_" + std::to_string(dump_cnt) + ".txt");
             }
 #    endif
         }
@@ -1899,6 +1956,11 @@ public:
         }
 #    endif
 
+#    if DUMP_TENSOR_CONTENTS
+        static int dump_cnt = 0;
+        dump_cnt++;
+#endif
+
         for (size_t expert_no = 0; expert_no < config.num_expert; expert_no++) {
             if (expert_no >= expert_mask.pred_flag.size()) {
                 OPENVINO_THROW("expert_no=", expert_no, " is out of bounds");
@@ -1944,6 +2006,7 @@ public:
                 // debug print
                 stream.finish();  // debug
                 print_mem_f16(stream, scratch.up, "up_output", n_token);
+                // save_mem_f16(stream, scratch.up, "onednn_up_output_expert_" + std::to_string(expert_no) + "_ntoken_" + std::to_string(n_token) + "_" + std::to_string(dump_cnt) + ".txt");
             }
 #    endif
             // gate
@@ -1957,6 +2020,7 @@ public:
                 // debug print
                 stream.finish();  // debug
                 print_mem_f16(stream, scratch.gate, "gate_up_output", n_token);
+                // save_mem_f16(stream, scratch.gate, "onednn_gate_output_expert_" + std::to_string(expert_no) + "_ntoken_" + std::to_string(n_token) + "_" + std::to_string(dump_cnt) + ".txt");
             }
 #    endif
             // down
@@ -1970,6 +2034,7 @@ public:
                 // debug print
                 stream.finish();  // debug
                 print_mem_f16(stream, scratch.y, "down_with_weights_output", n_token);
+                // save_mem_f16(stream, scratch.y, "onednn_down_output_expert_" + std::to_string(expert_no) + "_ntoken_" + std::to_string(n_token) + "_" + std::to_string(dump_cnt) + ".txt");
             }
 #    endif
             // index_add
@@ -1987,6 +2052,7 @@ public:
             // debug print
             stream.finish();  // debug
             print_mem_f16(stream, final_hidden_states_mem_ptr, "final_output");
+            save_mem_f16(stream, final_hidden_states_mem_ptr, "onednn_final_output_" + std::to_string(dump_cnt) + ".txt");
             std::cout << std::endl << std::endl;
         }
 #    endif
@@ -2085,6 +2151,10 @@ public:
             stream.finish();  // debug
             print_mem_f16(stream, hidden_states_mem_ptr, "input_token");
             print_mem_f16(stream, instance.input_memory_ptr(static_cast<size_t>(MOE3GemmInputIndex::ROUTING_WEIGHTS)), "input_weights_router");
+            static int dump_cnt = 0;
+            dump_cnt++;
+            save_mem_f16(stream, hidden_states_mem_ptr, "input_token_" +  std::to_string(dump_cnt) + ".txt");
+            save_mem_f16(stream, instance.input_memory_ptr(static_cast<size_t>(MOE3GemmInputIndex::ROUTING_WEIGHTS)), "input_weights_router_" + std::to_string(dump_cnt) + ".txt");
             auto routing_mem_ptr = scratch.topk_weights;
             print_mem_f16(stream, routing_mem_ptr, "topk_router_weights");
         }

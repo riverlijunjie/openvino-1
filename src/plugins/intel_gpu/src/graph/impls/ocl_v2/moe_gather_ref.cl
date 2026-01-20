@@ -18,6 +18,7 @@ KERNEL(moe_gather_ref)(
     ,const __global INPUT3_TYPE* topk_ids
     ,const __global INPUT4_TYPE* expert_ids
     ,const __global INPUT5_TYPE* start_offsets
+    ,const __global INPUT6_TYPE* expert_lens
 #ifdef SET_ACTUAL_USED_EXPERTS_NUM
     ,const __global INPUT4_TYPE* used_expert_num
 #endif
@@ -57,7 +58,7 @@ KERNEL(moe_gather_ref)(
     if (threads_index == 0) {
         int token_id = token_indices[token_group_id];
         // find out which k-th expert it is
-        int expert_id = 0;
+        int expert_id = -1;
 #ifdef SET_ACTUAL_USED_EXPERTS_NUM
         int actual_used_expert_num = used_expert_num[0];
         int last_expert_idx = 0;
@@ -67,7 +68,9 @@ KERNEL(moe_gather_ref)(
              if (token_group_id >= start_offset) {
                  // check next
                  if (i == actual_used_expert_num - 1 || token_group_id < start_offsets[i+1]) {
-                     expert_id = expert_ids[i];
+                     if (token_group_id < start_offset + expert_lens[i]) {
+                         expert_id = expert_ids[i];
+                     }
                      break;
                  }
              }
@@ -81,10 +84,12 @@ KERNEL(moe_gather_ref)(
         const __global INPUT2_TYPE* current_token_weights = routing_weights + token_id * TOP_K;
         
         OUTPUT2_TYPE w = 0;
-        for (int k = 0; k < TOP_K; k++) {
-            if (current_token_topk[k] == expert_id) {
-                w = current_token_weights[k];
-                break;
+        if (expert_id != -1) {
+             for (int k = 0; k < TOP_K; k++) {
+                if (current_token_topk[k] == expert_id) {
+                    w = current_token_weights[k];
+                    break;
+                }
             }
         }
         
