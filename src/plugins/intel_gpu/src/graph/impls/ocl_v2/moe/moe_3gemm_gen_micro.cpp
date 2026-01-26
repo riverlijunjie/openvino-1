@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-#ifdef ENABLE_ONEDNN_FOR_GPU
 // clang-format off
 // Put this file at first to avoid incorrect header files includes order.
 // For example, intel_gpu/runtime/utils.hpp will causes compiling error in hash<dnnl::impl::primitive_hashing::key_t>
@@ -14,6 +13,7 @@
 #include "../utils/kernel_generator.hpp"
 
 // clang-format on
+#ifdef ENABLE_ONEDNN_FOR_GPU
 namespace ov::intel_gpu::ocl {
 
 static size_t get_subgroup_size(gpu_arch arch) {
@@ -38,7 +38,7 @@ JitConstants MoE3GemmMicroGenerator::get_jit_constants(const kernel_impl_params&
     const size_t subgroup_size = get_subgroup_size(device_info.arch);
     const auto& weight_layout = params.input_layouts[m_wei_idx];
     const auto& scale_layout = params.input_layouts[m_scale_idx];
-    const auto& zp_layout = params.input_layouts[m_zp_idx];
+    auto desc = params.typed_desc<moe_3gemm_fused_compressed>();
 
     // Internal generator of JIT constants, require intermediate buffers and part of primitive's inputs.
     // JitConstants jit = make_base_jit_constants(params);
@@ -75,30 +75,46 @@ JitConstants MoE3GemmMicroGenerator::get_jit_constants(const kernel_impl_params&
     jit.make("INPUT4_TYPE", to_ocl_type(data_types::i32));             // n_array: i32
     jit.make("WEIGHT_SCALE_DT", to_ocl_type(scale_layout.data_type));  // scale: f16
 
-    if (zp_layout.data_type == ov::element::u4 || zp_layout.data_type == ov::element::i4) {
-        jit.make("WEIGHT_ZP_DT", to_ocl_type(data_types::u8));  // zp: u4/i4
-        jit.make("WEIGHT_COMPRESSED_ZP_INT4", 1);
-    } else {
-        jit.make("WEIGHT_ZP_DT", to_ocl_type(zp_layout.data_type));  // zp type
-        jit.make("WEIGHT_COMPRESSED_ZP_INT4", 0);
+    if(desc->_config.has_bias) {
+        const auto& bias_layout = params.input_layouts[m_bias_idx];
+        const auto& bias_shape = bias_layout.get_shape();
+        jit.make("BIAS_DT", to_ocl_type(data_types::f16));
+        jit.make("BIAS_STRIDE", bias_shape[1] * bias_shape[2]);
+        GPU_DEBUG_TRACE_DETAIL << "\t m_bias_idx: " << m_bias_idx << std::endl;
+        GPU_DEBUG_TRACE_DETAIL << "\t m_bias_idx.get_shape(): " << bias_layout.to_short_string() << std::endl;
+    }
+
+    if (desc->_config.has_zp) {
+        const auto& zp_layout = params.input_layouts[m_zp_idx];
+        if (zp_layout.data_type == ov::element::u4 || zp_layout.data_type == ov::element::i4) {
+            jit.make("WEIGHT_ZP_DT", to_ocl_type(data_types::u8));  // zp: u4/i4
+            jit.make("WEIGHT_COMPRESSED_ZP_INT4", 1);
+        } else {
+            jit.make("WEIGHT_ZP_DT", to_ocl_type(zp_layout.data_type));  // zp type
+            jit.make("WEIGHT_COMPRESSED_ZP_INT4", 0);
+        }
     }
 
     jit.make("IS_GENERATE", 0);    // only for prefill
     jit.make("INPUT_SEQ_LEN", 4);  // prefill not use it
-    jit.make("SCALE_ZP_NO_TRANSPOSE", 1);
+
+    if(desc->_config.fused_gate_up)
+        jit.make("SCALE_ZP_NO_TRANSPOSE", 0);
+    else
+        jit.make("SCALE_ZP_NO_TRANSPOSE", 1);
 
     GPU_DEBUG_TRACE_DETAIL << "\t m_scale_idx: " << m_scale_idx << std::endl;
     GPU_DEBUG_TRACE_DETAIL << "\t m_scale_idx.get_shape(): " << scale_layout.to_short_string() << std::endl;
     if (cfg.weight_group_size > 0) {
         const auto scale_shape = scale_layout.get_shape();
-        jit.make("NUM_GROUPS", scale_shape[1]);
-        GPU_DEBUG_TRACE_DETAIL << "\t NUM_GROUPS: " << scale_shape[1] << std::endl;
+        const auto num_groups = desc->_config.fused_gate_up ? scale_shape[2] : scale_shape[1];
+        jit.make("NUM_GROUPS", num_groups);
+        GPU_DEBUG_TRACE_DETAIL << "\t NUM_GROUPS: " << num_groups << std::endl;
     } else {
         jit.make("NUM_GROUPS", 1);
         GPU_DEBUG_TRACE_DETAIL << "\t NUM_GROUPS: 1" << std::endl;
     }
 
-    auto desc = params.typed_desc<moe_3gemm_fused_compressed>();
     switch (m_type) {
     case MoE3GemmMicroKernelType::MLP_GATE:
     case MoE3GemmMicroKernelType::MLP_UP:
@@ -108,6 +124,22 @@ JitConstants MoE3GemmMicroGenerator::get_jit_constants(const kernel_impl_params&
         break;
     case MoE3GemmMicroKernelType::MLP_DOWN:
         jit.make("INPUT_STRIDE", desc->_config.inter_size);
+        jit.make("OUTPUT_STRIDE", desc->_config.hidden_size);
+        break;
+    case MoE3GemmMicroKernelType::MLP_FUSED_GATE_UP:
+        jit.make("INPUT_STRIDE", desc->_config.hidden_size);
+        jit.make("OUTPUT_STRIDE", desc->_config.inter_size * 2);
+        break;
+    case MoE3GemmMicroKernelType::MLP_FUSED_DOWN:
+        jit.make("INPUT_STRIDE", desc->_config.inter_size * 2);
+        jit.make("OUTPUT_STRIDE", desc->_config.hidden_size);
+        break;
+    case MoE3GemmMicroKernelType::MLP_FUSED_GATE_UP_NO_ZP:
+        jit.make("INPUT_STRIDE", desc->_config.hidden_size);
+        jit.make("OUTPUT_STRIDE", desc->_config.inter_size * 2);
+        break;
+    case MoE3GemmMicroKernelType::MLP_FUSED_DOWN_NO_ZP:
+        jit.make("INPUT_STRIDE", desc->_config.inter_size * 2);
         jit.make("OUTPUT_STRIDE", desc->_config.hidden_size);
         break;
     default:
@@ -149,7 +181,7 @@ std::unordered_map<MoE3GemmMicroGenerator::GemmCacheKey, micro::Package, MoE3Gem
 void MoE3GemmMicroGenerator::init_microkernels(const kernel_impl_params& params, micro::Package& gemm_moe, MoE3GemmMicroKernelType type) noexcept {
     std::lock_guard<std::mutex> l(mtx);
 
-    int wei_idx, scale_idx, zp_idx;
+    int wei_idx, scale_idx, zp_idx = MOE_INVALID_INPUT_IDX, bias_idx = MOE_INVALID_INPUT_IDX;
     auto desc = params.typed_desc<moe_3gemm_fused_compressed>();
     size_t group_size = desc->_config.group_size;
     switch (type) {
@@ -177,6 +209,41 @@ void MoE3GemmMicroGenerator::init_microkernels(const kernel_impl_params& params,
             group_size = desc->_config.inter_size;
         }
         break;
+    case MoE3GemmMicroKernelType::MLP_FUSED_GATE_UP:
+        wei_idx = static_cast<int>(MOE2GemmInputIndex::WEIGHT_0);
+        scale_idx = static_cast<int>(MOE2GemmInputIndex::SCALE_0);
+        zp_idx = static_cast<int>(MOE2GemmInputIndex::ZP_0);
+        bias_idx = static_cast<int>(MOE2GemmInputIndex::BIAS_0);
+        if (group_size == std::numeric_limits<size_t>::max()) {
+            group_size = desc->_config.hidden_size;
+        }
+        break;
+    case MoE3GemmMicroKernelType::MLP_FUSED_DOWN:
+        wei_idx = static_cast<int>(MOE2GemmInputIndex::WEIGHT_1);
+        scale_idx = static_cast<int>(MOE2GemmInputIndex::SCALE_1);
+        zp_idx = static_cast<int>(MOE2GemmInputIndex::ZP_1);
+        bias_idx = static_cast<int>(MOE2GemmInputIndex::BIAS_1);
+        if (group_size == std::numeric_limits<size_t>::max()) {
+            group_size = desc->_config.inter_size;
+        }
+        break;
+    case MoE3GemmMicroKernelType::MLP_FUSED_GATE_UP_NO_ZP:
+        wei_idx = static_cast<int>(MOE2GemmNoZpInputIndex::WEIGHT_0);
+        scale_idx = static_cast<int>(MOE2GemmNoZpInputIndex::SCALE_0);
+        zp_idx = MOE_INVALID_INPUT_IDX;
+        bias_idx = static_cast<int>(MOE2GemmNoZpInputIndex::BIAS_0);
+        if (group_size == std::numeric_limits<size_t>::max()) {
+            group_size = desc->_config.hidden_size;
+        }
+        break;
+    case MoE3GemmMicroKernelType::MLP_FUSED_DOWN_NO_ZP:
+        wei_idx = static_cast<int>(MOE2GemmNoZpInputIndex::WEIGHT_1);
+        scale_idx = static_cast<int>(MOE2GemmNoZpInputIndex::SCALE_1);
+        zp_idx = MOE_INVALID_INPUT_IDX;
+        bias_idx = static_cast<int>(MOE2GemmNoZpInputIndex::BIAS_1);
+        if (group_size == std::numeric_limits<size_t>::max()) {
+            group_size = desc->_config.inter_size;
+        }
     default:
         OPENVINO_THROW("Unsupported MoE3GemmMicroKernelType");
         break;
@@ -184,7 +251,7 @@ void MoE3GemmMicroGenerator::init_microkernels(const kernel_impl_params& params,
 
     const auto& weight_layout = params.get_input_layout(wei_idx);
     const auto& scale_layout = params.get_input_layout(scale_idx);
-    const auto& zp_layout = params.get_input_layout(zp_idx);
+    const auto& zp_layout = desc->_config.has_zp ? params.get_input_layout(zp_idx) : params.get_input_layout(bias_idx);
 
     MoE3GemmMicroGenerator::GemmCacheKey key;
     key.weight_shape = weight_layout.get_shape();
@@ -223,6 +290,9 @@ void MoE3GemmMicroGenerator::init_microkernels(const kernel_impl_params& params,
     enum class MICRO_DIMENSIONALITY { NONE = -1, SCALAR = 0, VECTOR = 1, MATRIX = 2 };
 
     const bool is_weight_quantized = true;
+    const bool is_scale_zp_transposed = desc->_config.fused_gate_up ? true : false;
+    const bool has_zp = desc->_config.has_zp;
+    const bool has_bias = desc->_config.has_bias;
     if (is_weight_quantized) {
         problem_moe.Ta = micro::Type::f16;
         problem_moe.Ta_ext = convert_type(params.get_input_layout(wei_idx).data_type);
@@ -232,26 +302,28 @@ void MoE3GemmMicroGenerator::init_microkernels(const kernel_impl_params& params,
         const auto& scale_layout = params.get_input_layout(scale_idx);
         problem_moe.Ta_scale = convert_type(scale_layout.data_type);
         problem_moe.A_scale.setAlignment(2);
-        problem_moe.A_scale.layout = micro::MatrixLayout::N;
+        problem_moe.A_scale.layout = is_scale_zp_transposed ? micro::MatrixLayout::T : micro::MatrixLayout::N;
         problem_moe.asPtrDims = static_cast<int>(MICRO_DIMENSIONALITY::MATRIX);
 
         problem_moe.aqGroupM = 1;
         problem_moe.aqGroupK = static_cast<int>(group_size);
 
         opts_moe.scaleA = true;
-        const bool is_weight_symmetric_quantized = false;
-        if (!is_weight_symmetric_quantized) {
+        if (has_zp) {
             // zp layout example: u4:bfyx:4x8x3072:nopad
             const auto& zp_layout = params.get_input_layout(zp_idx);
             const auto zp_dt = convert_type(zp_layout.data_type);
             problem_moe.Tao = zp_dt;
             problem_moe.AO.setAlignment(zp_dt == micro::Type::u4 ? 1 : static_cast<int32_t>(zp_dt.size()));
-            problem_moe.AO.layout = micro::MatrixLayout::N;
+            problem_moe.AO.layout = is_scale_zp_transposed ? micro::MatrixLayout::T : micro::MatrixLayout::N;
             problem_moe.aoPtrDims = static_cast<int>(MICRO_DIMENSIONALITY::MATRIX);
             // Calculate A/B row/column sums in kernel.
             problem_moe.aOffset = micro::ABOffset::Calc;
             opts_moe.offsetA = true;
         }
+    } else {
+        problem_moe.Ta = problem_moe.Ta_ext = convert_type(params.get_input_layout(wei_idx).data_type);
+        problem_moe.A.setAlignment(micro::alignment_for_ld(k * problem_moe.Ta));
     }
 
     problem_moe.Tb = problem_moe.Tb_ext = micro::Type::f16;
@@ -308,6 +380,8 @@ DispatchDataFunc MoE3GemmMicroGenerator::get_dispatch_data_func() const {
         GPU_DEBUG_TRACE_DETAIL << "\t wei_idx = " << wei_idx << std::endl;
         GPU_DEBUG_TRACE_DETAIL << "\t experts_weight_layout: " << experts_weight_layout.to_short_string() << std::endl;
 
+        auto cur_moe = params.typed_desc<moe_3gemm_fused_compressed>();
+        const auto& config = cur_moe->_config;
         // has_batch_dim indicates whether the input tensor has batch dimension
         size_t n = input_layout.get_shape()[0];
         switch (input_layout.get_shape().size()) {
@@ -322,8 +396,10 @@ DispatchDataFunc MoE3GemmMicroGenerator::get_dispatch_data_func() const {
             OPENVINO_THROW("Unsupported input tensor shape size: ", input_layout.get_shape().size());
         }
 
-        auto cur_moe = params.typed_desc<moe_3gemm_fused_compressed>();
-        const auto& config = cur_moe->_config;
+        size_t temp_n = config.has_batch_dim ? input_layout.get_shape()[1] : input_layout.get_shape()[0];
+        if (temp_n != n)
+            std::cout << "temp_n: " << temp_n << ", n = " << n << std::endl;
+
         n = n * config.top_k;
         GPU_DEBUG_TRACE_DETAIL << "\t n = " << n << std::endl;
 
@@ -395,6 +471,56 @@ Arguments MoE3GemmMicroGenerator::get_arguments_desc(const kernel_impl_params& p
         args.push_back({ArgumentDescriptor::Types::SCALAR, 1});                                                            // k
         args.push_back({ArgumentDescriptor::Types::INPUT, static_cast<int>(MOE3GemmInputIndex::SCALE_2)});                 // scale
         args.push_back({ArgumentDescriptor::Types::INPUT, static_cast<int>(MOE3GemmInputIndex::ZP_2)});                    // zp
+        break;
+    case MoE3GemmMicroKernelType::MLP_FUSED_GATE_UP:
+        args.push_back({ArgumentDescriptor::Types::INTERNAL_BUFFER, MOE_INTERNAL_BUFFER_GATE_UP_INPUT});  // gather input tensor
+        args.push_back({ArgumentDescriptor::Types::INPUT, static_cast<int>(MOE2GemmInputIndex::WEIGHT_0)});
+        args.push_back({ArgumentDescriptor::Types::INTERNAL_BUFFER, MOE_INTERNAL_BUFFER_GATE_OUTPUT});                     // gate output
+        args.push_back({ArgumentDescriptor::Types::INTERNAL_BUFFER, MOE_INTERNAL_BUFFER_ACTIVATED_EXPERT_IDS});            // experts_ids
+        args.push_back({ArgumentDescriptor::Types::INTERNAL_BUFFER, MOE_INTERNAL_BUFFER_TOKEN_START_OFFSET_PER_EXPERT});   // input_offset_per_expert
+        args.push_back({ArgumentDescriptor::Types::INTERNAL_BUFFER, MOE_INTERNAL_BUFFER_TOKEN_LEN_PER_ACTIVATED_EXPERT});  // n_array - token len
+        args.push_back({ArgumentDescriptor::Types::SCALAR, 0});                                                            // m
+        args.push_back({ArgumentDescriptor::Types::SCALAR, 1});                                                            // k
+        args.push_back({ArgumentDescriptor::Types::INPUT, static_cast<int>(MOE2GemmInputIndex::BIAS_0)});                  // bias
+        args.push_back({ArgumentDescriptor::Types::INPUT, static_cast<int>(MOE2GemmInputIndex::SCALE_0)});                 // scale
+        args.push_back({ArgumentDescriptor::Types::INPUT, static_cast<int>(MOE2GemmInputIndex::ZP_0)});                    // zp
+        break;
+    case MoE3GemmMicroKernelType::MLP_FUSED_DOWN:
+        args.push_back({ArgumentDescriptor::Types::INTERNAL_BUFFER, MOE_INTERNAL_BUFFER_GATE_OUTPUT});  // intermediate_mem[6]
+        args.push_back({ArgumentDescriptor::Types::INPUT, static_cast<int>(MOE2GemmInputIndex::WEIGHT_1)});
+        args.push_back({ArgumentDescriptor::Types::INTERNAL_BUFFER, MOE_INTERNAL_BUFFER_DOWN_OUTPUT});                     // down output
+        args.push_back({ArgumentDescriptor::Types::INTERNAL_BUFFER, MOE_INTERNAL_BUFFER_ACTIVATED_EXPERT_IDS});            // experts_ids
+        args.push_back({ArgumentDescriptor::Types::INTERNAL_BUFFER, MOE_INTERNAL_BUFFER_TOKEN_START_OFFSET_PER_EXPERT});   // input_offset_per_expert
+        args.push_back({ArgumentDescriptor::Types::INTERNAL_BUFFER, MOE_INTERNAL_BUFFER_TOKEN_LEN_PER_ACTIVATED_EXPERT});  // n_array - token len
+        args.push_back({ArgumentDescriptor::Types::SCALAR, 0});                                                            // m
+        args.push_back({ArgumentDescriptor::Types::SCALAR, 1});                                                            // k
+        args.push_back({ArgumentDescriptor::Types::INPUT, static_cast<int>(MOE2GemmInputIndex::BIAS_1)});                  // bias
+        args.push_back({ArgumentDescriptor::Types::INPUT, static_cast<int>(MOE2GemmInputIndex::SCALE_1)});                 // scale
+        args.push_back({ArgumentDescriptor::Types::INPUT, static_cast<int>(MOE2GemmInputIndex::ZP_1)});                    // zp
+        break;
+    case MoE3GemmMicroKernelType::MLP_FUSED_GATE_UP_NO_ZP:
+        args.push_back({ArgumentDescriptor::Types::INTERNAL_BUFFER, MOE_INTERNAL_BUFFER_GATE_UP_INPUT});  // gather input tensor
+        args.push_back({ArgumentDescriptor::Types::INPUT, static_cast<int>(MOE2GemmNoZpInputIndex::WEIGHT_0)});
+        args.push_back({ArgumentDescriptor::Types::INTERNAL_BUFFER, MOE_INTERNAL_BUFFER_GATE_OUTPUT});                     // gate output
+        args.push_back({ArgumentDescriptor::Types::INTERNAL_BUFFER, MOE_INTERNAL_BUFFER_ACTIVATED_EXPERT_IDS});            // experts_ids
+        args.push_back({ArgumentDescriptor::Types::INTERNAL_BUFFER, MOE_INTERNAL_BUFFER_TOKEN_START_OFFSET_PER_EXPERT});   // input_offset_per_expert
+        args.push_back({ArgumentDescriptor::Types::INTERNAL_BUFFER, MOE_INTERNAL_BUFFER_TOKEN_LEN_PER_ACTIVATED_EXPERT});  // n_array - token len
+        args.push_back({ArgumentDescriptor::Types::SCALAR, 0});                                                            // m
+        args.push_back({ArgumentDescriptor::Types::SCALAR, 1});                                                            // k
+        args.push_back({ArgumentDescriptor::Types::INPUT, static_cast<int>(MOE2GemmNoZpInputIndex::BIAS_0)});              // bias
+        args.push_back({ArgumentDescriptor::Types::INPUT, static_cast<int>(MOE2GemmNoZpInputIndex::SCALE_0)});             // scale
+        break;
+    case MoE3GemmMicroKernelType::MLP_FUSED_DOWN_NO_ZP:
+        args.push_back({ArgumentDescriptor::Types::INTERNAL_BUFFER, MOE_INTERNAL_BUFFER_GATE_OUTPUT});  // intermediate_mem[6]
+        args.push_back({ArgumentDescriptor::Types::INPUT, static_cast<int>(MOE2GemmNoZpInputIndex::WEIGHT_1)});
+        args.push_back({ArgumentDescriptor::Types::INTERNAL_BUFFER, MOE_INTERNAL_BUFFER_DOWN_OUTPUT});                     // down output
+        args.push_back({ArgumentDescriptor::Types::INTERNAL_BUFFER, MOE_INTERNAL_BUFFER_ACTIVATED_EXPERT_IDS});            // experts_ids
+        args.push_back({ArgumentDescriptor::Types::INTERNAL_BUFFER, MOE_INTERNAL_BUFFER_TOKEN_START_OFFSET_PER_EXPERT});   // input_offset_per_expert
+        args.push_back({ArgumentDescriptor::Types::INTERNAL_BUFFER, MOE_INTERNAL_BUFFER_TOKEN_LEN_PER_ACTIVATED_EXPERT});  // n_array - token len
+        args.push_back({ArgumentDescriptor::Types::SCALAR, 0});                                                            // m
+        args.push_back({ArgumentDescriptor::Types::SCALAR, 1});                                                            // k
+        args.push_back({ArgumentDescriptor::Types::INPUT, static_cast<int>(MOE2GemmNoZpInputIndex::BIAS_1)});              // bias
+        args.push_back({ArgumentDescriptor::Types::INPUT, static_cast<int>(MOE2GemmNoZpInputIndex::SCALE_1)});             // scale
         break;
     default:
         OPENVINO_THROW("Unsupported MoE3GemmMicroKernelType");

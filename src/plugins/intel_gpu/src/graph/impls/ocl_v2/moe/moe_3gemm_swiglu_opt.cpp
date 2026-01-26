@@ -765,6 +765,10 @@ public:
     Stage::Ptr micro_gemm_gate = make_stage<MoE3GemmMicroGenerator>(MoE3GemmMicroKernelType::MLP_GATE);
     Stage::Ptr micro_gemm_up = make_stage<MoE3GemmMicroGenerator>(MoE3GemmMicroKernelType::MLP_UP);
     Stage::Ptr micro_gemm_down = make_stage<MoE3GemmMicroGenerator>(MoE3GemmMicroKernelType::MLP_DOWN);
+    Stage::Ptr micro_gemm_fused_gate_up = make_stage<MoE3GemmMicroGenerator>(MoE3GemmMicroKernelType::MLP_FUSED_GATE_UP);
+    Stage::Ptr micro_gemm_fused_down = make_stage<MoE3GemmMicroGenerator>(MoE3GemmMicroKernelType::MLP_FUSED_DOWN);
+    Stage::Ptr micro_gemm_fused_gate_up_no_zp = make_stage<MoE3GemmMicroGenerator>(MoE3GemmMicroKernelType::MLP_FUSED_GATE_UP_NO_ZP);
+    Stage::Ptr micro_gemm_fused_down_no_zp = make_stage<MoE3GemmMicroGenerator>(MoE3GemmMicroKernelType::MLP_FUSED_DOWN_NO_ZP);
     Stage::Ptr prefill_swiglu = make_stage<MoE3GemmSwigluPrefillSwiglu>();
     Stage::Ptr prefill_scatter_reduce = make_stage<MoE3GemmSwigluPrefillScatterReduce>();
     Stage::Ptr prefill_mask_gen = make_stage<MoE3GemmSwigluPrefillMaskGen>();
@@ -833,7 +837,8 @@ public:
         if (m_rt_params == nullptr) {
             m_rt_params = std::make_unique<MoE3GemmRuntimeParams>();
         }
-        init(node.as<moe_3gemm_fused_compressed>().get_primitive());
+        std::shared_ptr<const moe_3gemm_fused_compressed> cur_moe = node.as<moe_3gemm_fused_compressed>().get_primitive();
+        init(cur_moe);
 
         auto use_micro_gemm_prefill_str = std::getenv("MOE_USE_MICRO_GEMM_PREFILL");
         if (use_micro_gemm_prefill_str) {
@@ -870,6 +875,11 @@ public:
             use_micro_gemm_prefill = false;
         }
 
+        if(cur_moe->_config.fused_gate_up && use_micro_gemm_prefill == false) {
+            std::cout << "[ERROR] Fused gate_up without micro_gemm is not supported!" << std::endl;
+            exit(0);
+        }
+
         // Don't change the order of stages
         add_stage(softmax_topk, params);
         add_stage(gather, params);
@@ -880,10 +890,19 @@ public:
         if (use_micro_gemm_prefill) {
             add_stage(prefill_mask_gen, params);
             add_stage(prefill_gather, params);
-            add_stage(micro_gemm_gate, params);
-            add_stage(micro_gemm_up, params);
+            if(cur_moe->_config.fused_gate_up) {
+                if (cur_moe->_config.has_zp) {
+                    add_stage(micro_gemm_fused_gate_up, params);
+                    add_stage(micro_gemm_fused_down, params);
+                } else {
+                    add_stage(micro_gemm_fused_gate_up_no_zp, params);
+                    add_stage(micro_gemm_fused_down_no_zp, params);
+                }
+            } else {
+                add_stage(micro_gemm_gate, params);
+                add_stage(micro_gemm_up, params);
+            }
             add_stage(prefill_swiglu, params);
-            add_stage(micro_gemm_down, params);
             add_stage(prefill_scatter_reduce, params);
         }
     }

@@ -9,6 +9,8 @@
 
 #include "moe_gemm_base.hpp"
 
+#define ENABLE_ONEDNN_FOR_GPU 1
+
 namespace ov::intel_gpu::ocl {
 
 #define MOE_INTERNAL_BUFFER_TOPK_IDX                       0   // topk_idx
@@ -26,7 +28,17 @@ namespace ov::intel_gpu::ocl {
 #define MOE_INTERNAL_BUFFER_TOKEN_IDX_PER_EXPERT           12  // token idx per expert
 #define MOE_INTERNAL_BUFFER_ACTUAL_USED_EXPERT_NUM         13  // num_actual_used_experts
 
-enum class MoE3GemmMicroKernelType : uint8_t { MLP_GATE = 0, MLP_UP = 1, MLP_DOWN = 2 };
+#define MOE_INVALID_INPUT_IDX (-1)
+
+enum class MoE3GemmMicroKernelType : uint8_t {
+    MLP_GATE = 0,
+    MLP_UP = 1,
+    MLP_DOWN = 2,
+    MLP_FUSED_GATE_UP = 3,
+    MLP_FUSED_DOWN = 4,
+    MLP_FUSED_GATE_UP_NO_ZP = 5,
+    MLP_FUSED_DOWN_NO_ZP = 6
+};
 
 enum class MOE3GemmInputIndex : uint8_t {
     HIDDEN_STATES = 0,
@@ -40,6 +52,30 @@ enum class MOE3GemmInputIndex : uint8_t {
     WEIGHT_2 = 8,
     SCALE_2 = 9,
     ZP_2 = 10
+};
+
+enum class MOE2GemmNoZpInputIndex : uint8_t {
+    HIDDEN_STATES = 0,
+    ROUTING_WEIGHTS = 1,
+    WEIGHT_0 = 2,
+    SCALE_0 = 3,
+    BIAS_0 = 4,
+    WEIGHT_1 = 5,
+    SCALE_1 = 6,
+    BIAS_1 = 7,
+};
+
+enum class MOE2GemmInputIndex : uint8_t {
+    HIDDEN_STATES = 0,
+    ROUTING_WEIGHTS = 1,
+    WEIGHT_0 = 2,
+    SCALE_0 = 3,
+    ZP_0 = 4,
+    BIAS_0 = 5,
+    WEIGHT_1 = 6,
+    SCALE_1 = 7,
+    ZP_1 = 8,
+    BIAS_1 = 9,
 };
 
 struct moe_3gemm_config {

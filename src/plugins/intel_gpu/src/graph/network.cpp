@@ -774,6 +774,7 @@ void network::execute_impl(const std::vector<event::ptr>& events) {
         executed_prims++;
         if (needs_flushing && executed_prims % flush_frequency == 0)
             get_stream().flush();
+        get_stream().finish();
     }
 
     // Using output of previous network as input to another one may cause hazard (in OOOQ mode) if user would not

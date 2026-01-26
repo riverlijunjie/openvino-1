@@ -33,16 +33,43 @@ public:
             m_wei_idx = static_cast<int>(MOE3GemmInputIndex::WEIGHT_0);
             m_scale_idx = static_cast<int>(MOE3GemmInputIndex::SCALE_0);
             m_zp_idx = static_cast<int>(MOE3GemmInputIndex::ZP_0);
+            m_bias_idx = MOE_INVALID_INPUT_IDX;
             break;
         case MoE3GemmMicroKernelType::MLP_UP:
             m_wei_idx = static_cast<int>(MOE3GemmInputIndex::WEIGHT_1);
             m_scale_idx = static_cast<int>(MOE3GemmInputIndex::SCALE_1);
             m_zp_idx = static_cast<int>(MOE3GemmInputIndex::ZP_1);
+            m_bias_idx = MOE_INVALID_INPUT_IDX;
             break;
         case MoE3GemmMicroKernelType::MLP_DOWN:
             m_wei_idx = static_cast<int>(MOE3GemmInputIndex::WEIGHT_2);
             m_scale_idx = static_cast<int>(MOE3GemmInputIndex::SCALE_2);
             m_zp_idx = static_cast<int>(MOE3GemmInputIndex::ZP_2);
+            m_bias_idx = MOE_INVALID_INPUT_IDX;
+            break;
+        case MoE3GemmMicroKernelType::MLP_FUSED_GATE_UP:
+            m_wei_idx = static_cast<int>(MOE2GemmInputIndex::WEIGHT_0);
+            m_scale_idx = static_cast<int>(MOE2GemmInputIndex::SCALE_0);
+            m_zp_idx = static_cast<int>(MOE2GemmInputIndex::ZP_0);
+            m_bias_idx = static_cast<int>(MOE2GemmInputIndex::BIAS_0);
+            break;
+        case MoE3GemmMicroKernelType::MLP_FUSED_DOWN:
+            m_wei_idx = static_cast<int>(MOE2GemmInputIndex::WEIGHT_1);
+            m_scale_idx = static_cast<int>(MOE2GemmInputIndex::SCALE_1);
+            m_zp_idx = static_cast<int>(MOE2GemmInputIndex::ZP_1);
+            m_bias_idx = static_cast<int>(MOE2GemmInputIndex::BIAS_1);
+            break;
+        case MoE3GemmMicroKernelType::MLP_FUSED_GATE_UP_NO_ZP:
+            m_wei_idx = static_cast<int>(MOE2GemmNoZpInputIndex::WEIGHT_0);
+            m_scale_idx = static_cast<int>(MOE2GemmNoZpInputIndex::SCALE_0);
+            m_zp_idx = MOE_INVALID_INPUT_IDX;
+            m_bias_idx = static_cast<int>(MOE2GemmNoZpInputIndex::BIAS_0);
+            break;
+        case MoE3GemmMicroKernelType::MLP_FUSED_DOWN_NO_ZP:
+            m_wei_idx = static_cast<int>(MOE2GemmNoZpInputIndex::WEIGHT_1);
+            m_scale_idx = static_cast<int>(MOE2GemmNoZpInputIndex::SCALE_1);
+            m_zp_idx = MOE_INVALID_INPUT_IDX;
+            m_bias_idx = static_cast<int>(MOE2GemmNoZpInputIndex::BIAS_1);
             break;
         default:
             OPENVINO_THROW("Unsupported MoE3GemmMicroKernelType");
@@ -76,6 +103,7 @@ public:
     int m_wei_idx;
     int m_scale_idx;
     int m_zp_idx;
+    int m_bias_idx;
     static std::mutex mtx;
 
     struct GemmCacheKey {

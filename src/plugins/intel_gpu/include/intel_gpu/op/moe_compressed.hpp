@@ -29,6 +29,8 @@ public:
         // In Non-CB, intermediate shapes are expanded to {Batch, SeqLen, HiddenSize}
         size_t has_batch_dim = 0;
         bool has_zp = false;
+        bool has_bias = false;
+        bool fused_gate_up = false;
         ov::element::Type out_type = ov::element::dynamic;
         Config() = default;
         Config(const MOE::Config& moe_config) : MOE::Config(moe_config) {}

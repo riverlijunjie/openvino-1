@@ -34,26 +34,43 @@ static void CreateMOE3GemmFusedCompressedOp(ProgramBuilder& p, const std::shared
     auto inputs = p.GetInputInfo(op);
     const auto& config = op->get_config();
     ///   0: hidden_states - input tensor with hidden representations
+    ///                  shape [num_seq, hidden_size]
     ///   1: routing_weights - [num_seq, num_experts] routing weights for all experts
     ///   2: w0_weight - expert weights for first projection,
-    ///                  shape [num_experts, inter_size, group_num, group_size]
+    ///                  3gemm shape [num_experts, inter_size, group_num, group_size]
+    ///                  2gemm shape [num_experts, 2* inter_size, group_num, group_size]
     ///   3: w0_scale - expert scale for first projection for compressed experts,
-    ///                  shape [num_experts, inter_size, group_num, 1]
-    ///   4: w0_zp - expert zp for first projection for compressed experts,
-    ///                  shape [num_experts, inter_size, group_num, 1]
-    ///   5: w1_weight - expert weights for second projection,
-    ///                  shape [num_experts, inter_size, group_num, group_size]
-    ///   6: w1_scale - expert scale for second projection for compressed experts,
-    ///                  shape [num_experts, inter_size, group_num, 1]
-    ///   7: w1_zp - expert zp for second projection for compressed experts,
-    ///                  shape [num_experts, inter_size, group_num, 1]
-    ///   8: w2_weight - expert weights for final projection,
-    ///                  shape [num_experts, hidden_size, group_num, group_size]
-    ///   9: w2_scale - expert scale for final projection for compressed experts,
-    ///                  shape [num_experts, hidden_size, group_num, 1]
-    ///   10: w2_zp - expert zp for final projection for compressed experts,
-    ///                  shape [num_experts, hidden_size, group_num, 1]
-    validate_inputs_count(op, {11});
+    ///                  3gemm shape [num_experts, inter_size, group_num, 1]
+    ///                  2gemm shape [num_experts, 2* inter_size, group_num, 1]
+    ///   4: w0_zp(optional) - expert zp for first projection for compressed experts,
+    ///                  3gemm shape [num_experts, inter_size, group_num, 1]
+    ///                  2gemm shape [num_experts, 2* inter_size, group_num, 1]
+    ///   5: w0_bias(optional) - expert bias for first projection,
+    ///                  3gemm shape [num_experts, inter_size]
+    ///                  2gemm shape [num_experts, 2* inter_size]
+    ///   6: w1_weight(optional) - expert weights for second projection,
+    ///                  only 3gemm shape [num_experts, inter_size, group_num, group_size]
+    ///   7: w1_scale(optional) - expert scale for second projection for compressed experts,
+    ///                  only 3gemm shape [num_experts, inter_size, group_num, 1]
+    ///   8: w1_zp(optional) - expert zp for second projection for compressed experts,
+    ///                  only 3gemm shape [num_experts, inter_size, group_num, 1]
+    ///   9: w1_bias(optional) - expert bias for second projection,
+    ///                  only 3gemm shape [num_experts, inter_size]
+    ///   10: w2_weight - expert weights for final projection,
+    ///                  3gemm/2gemm shape [num_experts, hidden_size, group_num, group_size]
+    ///   11: w2_scale - expert scale for final projection for compressed experts,
+    ///                  3gemm/2gemm shape [num_experts, hidden_size, group_num, 1]
+    ///   12: w2_zp(optional) - expert zp for final projection for compressed experts,
+    ///                  3gemm/2gemm shape [num_experts, hidden_size, group_num, 1]
+    ///   13: w2_bias(optional) - expert bias for final projection,
+    ///                  3gemm/2gemm shape [num_experts, hidden_size]
+    ///
+    /// Qwen3 model uses 3gemm with 11 inputs: 0,1,2,3,4,6,7,8,10,11,12
+    /// GPT_OSS model uses 2gemm with 8 inputs: 0,1,2,3,5,10,11,13
+    /// GPT_OSS model use 2gemm with zp has 10 inputs: 0,1,2,3,4,5,10,11,12,13
+
+    /// Validate input count to cover all cases
+    validate_inputs_count(op, {8, 10, 11});
 
     const std::string layerName = layer_type_name_ID(op);
     const cldnn::moe_3gemm_fused_compressed moe(layerName, inputs, config);
