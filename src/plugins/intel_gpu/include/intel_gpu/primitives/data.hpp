@@ -24,6 +24,8 @@
 #include "primitive.hpp"
 #include "transformations/convert_precision.hpp"
 
+#include "intel_gpu/runtime/itt.hpp"
+
 using weights_memory_ptr = std::variant<std::shared_ptr<ov::MappedMemory>, std::shared_ptr<const ov::Model>>;
 using offset_const_map_t = std::map<size_t, std::shared_ptr<ov::op::v0::Constant>>;
 using shared_mapped_memory_ptr = std::shared_ptr<ov::SharedBuffer<std::shared_ptr<ov::MappedMemory>>>;
@@ -36,6 +38,7 @@ bool is_alloc_host_accessible(const cldnn::allocation_type& alloc_type) {
 }
 
 void copy_to_dst_mem(cldnn::memory::ptr mem_ptr, const uint8_t* data_ptr) {
+    OV_ITT_SCOPED_TASK(ov::intel_gpu::itt::domains::intel_gpu_plugin, "copy_to_dst_mem");
     if (is_alloc_host_accessible(mem_ptr->get_allocation_type())) {
         size_t data_size = mem_ptr->size();
         std::memcpy(reinterpret_cast<uint8_t*>(mem_ptr->buffer_ptr()),
@@ -174,6 +177,7 @@ struct weightless_cache_manager {
     }
 
     bool load(BinaryInputBuffer& ib, memory::ptr dst_mem, std::shared_ptr<WeightsMemory> weights_memory) {
+        OV_ITT_SCOPED_TASK(ov::intel_gpu::itt::domains::intel_gpu_plugin, "weightless_cache_manager::load");
         ib >> do_weightless_caching;
         if (!do_weightless_caching) {
             return false;
@@ -243,6 +247,7 @@ private:
     void run_transformations(engine& engine,
                              memory::ptr dst_mem,
                              constant_memory_ptr constant_ptr) {
+        OV_ITT_SCOPED_TASK(ov::intel_gpu::itt::domains::intel_gpu_plugin, "weightless_cache_manager::run_transformations");
         std::shared_ptr<ov::op::v0::Constant> transformed_constant = nullptr;
 
         // Note: this works only until the data is copied to dst_mem.
@@ -405,6 +410,7 @@ struct data : public primitive_base<data> {
     }
 
     void load_weights(BinaryInputBuffer& ib, std::shared_ptr<WeightsMemory> weights_memory) {
+        OV_ITT_SCOPED_TASK(ov::intel_gpu::itt::domains::intel_gpu_plugin, "data::load_weights");
         layout output_layout = layout();
         ib >> output_layout;
 
@@ -414,21 +420,31 @@ struct data : public primitive_base<data> {
         size_t data_size = 0;
         ib >> make_data(&data_size, sizeof(size_t));
 
-        mem = ib.get_engine().allocate_memory(output_layout, _allocation_type, false);
+        {
+            OV_ITT_SCOPED_TASK(ov::intel_gpu::itt::domains::intel_gpu_plugin, "load_weights::allocate_memory");
+            mem = ib.get_engine().allocate_memory(output_layout, _allocation_type, false);
+        }
 
-        bool is_weightless_caching = cache_info->load(ib, mem, weights_memory);
+        bool is_weightless_caching;
+        {
+            OV_ITT_SCOPED_TASK(ov::intel_gpu::itt::domains::intel_gpu_plugin, "load_weights::cache_info->load");
+            is_weightless_caching = cache_info->load(ib, mem, weights_memory);
+        }
 
         if (!is_weightless_caching) {
             if (is_alloc_host_accessible(_allocation_type)) {
+                OV_ITT_SCOPED_TASK(ov::intel_gpu::itt::domains::intel_gpu_plugin, "load_weights::copy_host_accessible");
                 ib >> make_data(mem->buffer_ptr(), data_size);
             } else {
                 const size_t DATA_BLOCK_SIZE = 2 * 1024 * 1024;
                 auto& strm = ib.get_engine().get_service_stream();
                 if (data_size < DATA_BLOCK_SIZE || output_layout.format.is_image_2d()) {
                     std::vector<uint8_t> _buf(data_size);
+                    OV_ITT_SCOPED_TASK(ov::intel_gpu::itt::domains::intel_gpu_plugin, "load_weights::copy_memory_small");
                     ib >> make_data(_buf.data(), data_size);
                     mem->copy_from(strm, _buf.data());
                 } else {
+                    OV_ITT_SCOPED_TASK(ov::intel_gpu::itt::domains::intel_gpu_plugin, "load_weights::copy_memory_large");
                     std::vector<uint8_t> _buf1(DATA_BLOCK_SIZE);
                     std::vector<uint8_t> _buf2(DATA_BLOCK_SIZE);
                     bool buf_flag = true;

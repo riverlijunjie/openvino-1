@@ -88,6 +88,7 @@ CompiledModel::CompiledModel(cldnn::BinaryInputBuffer& ib,
         size_t num_params;
         ib >> num_params;
 
+        OV_ITT_SCOPED_TASK(itt::domains::intel_gpu_plugin, "Plugin::ImportNetwork::new_param");
         for (size_t idx = 0; idx < num_params; ++idx) {
             std::string param_name;
             ib >> param_name;
@@ -117,6 +118,7 @@ CompiledModel::CompiledModel(cldnn::BinaryInputBuffer& ib,
     }
 
     {
+        OV_ITT_SCOPED_TASK(itt::domains::intel_gpu_plugin, "Plugin::ImportNetwork::new_result");
         size_t num_results;
         ib >> num_results;
 
@@ -157,6 +159,7 @@ CompiledModel::CompiledModel(cldnn::BinaryInputBuffer& ib,
         }
     }
 
+    OV_ITT_SCOPED_TASK(itt::domains::intel_gpu_plugin, "Plugin::ImportNetwork::m_graphs");
     auto graph_base = std::make_shared<Graph>(ib, context, m_config, 0);
     for (uint16_t n = 0; n < m_config.get_num_streams(); n++) {
         auto graph = n == 0 ? graph_base : std::make_shared<Graph>(graph_base, n);

@@ -29,6 +29,7 @@
 
 #include "intel_gpu/primitives/data.hpp"
 #include "intel_gpu/runtime/debug_configuration.hpp"
+#include "intel_gpu/runtime/itt.hpp"
 
 namespace ov::intel_gpu {
 
@@ -74,6 +75,7 @@ struct ConstProperties {
 };
 
 static void create_data(ProgramBuilder& p, const ov::Shape& const_shape, const std::shared_ptr<ov::op::v0::Constant>& op, const ConstProperties& props) {
+    OV_ITT_SCOPED_TASK(ov::intel_gpu::itt::domains::intel_gpu_plugin, "create_data");
     cldnn::tensor constTensor = getConstTensor(const_shape);
     auto constFormat = cldnn::format::get_default_format(const_shape.size());
 
@@ -156,6 +158,7 @@ static bool is_btiwise(Node* node) {
 }
 
 static void CreateConstantOp(ProgramBuilder& p, const std::shared_ptr<ov::op::v0::Constant>& op) {
+    OV_ITT_SCOPED_TASK(ov::intel_gpu::itt::domains::intel_gpu_plugin, "CreateConstantOp");
     ov::Shape constDims = op->get_shape();
     auto constUsers = op->get_output_target_inputs(0);
     std::unordered_map<std::shared_ptr<ov::op::v0::Constant>, ConstProperties> consts = {

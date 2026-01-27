@@ -1959,6 +1959,7 @@ void program::load(cldnn::BinaryInputBuffer& ib,
                    std::shared_ptr<ov::intel_gpu::GpuWeightlessCacheMap> cache_attr_map) {
     init_program();
 
+    OV_ITT_SCOPED_TASK(itt::domains::intel_gpu_plugin, "program::load");
     std::shared_ptr<WeightsMemory> weights_memory = nullptr;
     std::string weights_path = _config.get_weights_path();
     if (_config.get_enable_weightless()) {
@@ -1980,6 +1981,7 @@ void program::load(cldnn::BinaryInputBuffer& ib,
     ib >> num_nodes;
     bool is_valid_data_node;
     for (size_t i = 0; i < num_nodes; ++i) {
+        OV_ITT_SCOPED_TASK(itt::domains::intel_gpu_plugin, "program::load::get_or_create");
         ib >> is_valid_data_node;
         if (!is_valid_data_node)
             continue;
@@ -1987,6 +1989,7 @@ void program::load(cldnn::BinaryInputBuffer& ib,
         std::shared_ptr<cldnn::primitive> prim;
         ib >> prim;
         if (auto data_prim = dynamic_cast<cldnn::data*>(prim.get())) {
+            OV_ITT_SCOPED_TASK(itt::domains::intel_gpu_plugin, "program::load::load_weights");
             data_prim->load_weights(ib, weights_memory);
         }
         get_or_create(prim);
@@ -1995,6 +1998,7 @@ void program::load(cldnn::BinaryInputBuffer& ib,
     size_t num_output_sharing_mutable_datas;
     ib >> num_output_sharing_mutable_datas;
     for (size_t i = 0; i < num_output_sharing_mutable_datas; ++i) {
+        OV_ITT_SCOPED_TASK(itt::domains::intel_gpu_plugin, "replace_memory");
         primitive_id md_id1, md_id2;
         ib >> md_id1;
         ib >> md_id2;
@@ -2041,12 +2045,18 @@ void program::load(cldnn::BinaryInputBuffer& ib,
     ib >> _is_body_program;
     ib >> _can_be_optimized;
 
-    _layout_optimizer->load(ib);
-    _layout_optimizer->set_implementation_forcing(_config.get_force_implementations());
+    {
+        OV_ITT_SCOPED_TASK(itt::domains::intel_gpu_plugin, "_layout_optimizer->load");
+        _layout_optimizer->load(ib);
+        _layout_optimizer->set_implementation_forcing(_config.get_force_implementations());
+    }
 
     _loaded_from_cache = true;
 
-    processing_order.load(ib, *this);
+    {
+        OV_ITT_SCOPED_TASK(itt::domains::intel_gpu_plugin, "processing_order.load");
+        processing_order.load(ib, *this);
+    }
 
     {
         auto& kernels_cache = get_kernels_cache();
@@ -2056,6 +2066,7 @@ void program::load(cldnn::BinaryInputBuffer& ib,
         ib >> impl_ids;
 
         for (auto& impl_id : impl_ids) {
+            OV_ITT_SCOPED_TASK(itt::domains::intel_gpu_plugin, "init_by_cached_kernels");
             auto& p_node = get_node(impl_id);
             std::string type_name;
             ib >> type_name;

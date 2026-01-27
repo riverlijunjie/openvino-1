@@ -15,6 +15,7 @@
 #include <memory>
 #include <string>
 #include <variant>
+#include "itt.hpp"
 
 #include "openvino/runtime/shared_buffer.hpp"
 #include "openvino/runtime/tensor.hpp"
@@ -141,13 +142,17 @@ private:
 
     void read_cache_entry(const std::string& id, bool enable_mmap, StreamReader reader) override {
         // Fix the bug caused by pugixml, which may return unexpected results if the locale is different from "C".
+        OV_ITT_SCOPE(FIRST_INFERENCE, ov::itt::domains::LoadTime, "read_cache_entry");
         ScopedLocale plocal_C(LC_ALL, "C");
         const auto blob_path = get_blob_file(id);
         if (std::filesystem::exists(blob_path)) {
+            OV_ITT_SCOPE(FIRST_INFERENCE, ov::itt::domains::LoadTime, "read_cache_entry::reader");
             if (enable_mmap) {
+                OV_ITT_SCOPE(FIRST_INFERENCE, ov::itt::domains::LoadTime, "read_cache_entry::reader_mmap");
                 CompiledBlobVariant compiled_blob{std::in_place_index<0>, ov::read_tensor_data(blob_path)};
                 reader(compiled_blob);
             } else {
+                OV_ITT_SCOPE(FIRST_INFERENCE, ov::itt::domains::LoadTime, "read_cache_entry::reader_non_mmap");
                 std::ifstream stream(blob_path, std::ios_base::binary);
                 CompiledBlobVariant compiled_blob{std::in_place_index<1>, std::ref(stream)};
                 reader(compiled_blob);

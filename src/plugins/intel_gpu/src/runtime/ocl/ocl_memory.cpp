@@ -6,6 +6,9 @@
 #include "intel_gpu/runtime/error_handler.hpp"
 #include "intel_gpu/runtime/memory.hpp"
 #include "intel_gpu/runtime/utils.hpp"
+#include "intel_gpu/runtime/profiling.hpp"
+#include "intel_gpu/runtime/debug_configuration.hpp"
+#include "intel_gpu/runtime/itt.hpp"
 #include "ocl_memory.hpp"
 #include "ocl_engine.hpp"
 #include "ocl_stream.hpp"
@@ -158,6 +161,7 @@ shared_mem_params gpu_buffer::get_internal_params() const {
 }
 
 event::ptr gpu_buffer::copy_from(stream& stream, const void* data_ptr, size_t src_offset, size_t dst_offset, size_t size, bool blocking) {
+    OV_ITT_SCOPED_TASK(ov::intel_gpu::itt::domains::intel_gpu_plugin, "gpu_buffer::copy_from_ptr");
     auto result_event = create_event(stream, size, blocking);
     if (size == 0)
         return result_event;
@@ -174,6 +178,7 @@ event::ptr gpu_buffer::copy_from(stream& stream, const void* data_ptr, size_t sr
 }
 
 event::ptr gpu_buffer::copy_from(stream& stream, const memory& src_mem, size_t src_offset, size_t dst_offset, size_t size, bool blocking) {
+    OV_ITT_SCOPED_TASK(ov::intel_gpu::itt::domains::intel_gpu_plugin, "gpu_buffer::copy_from_mem");
     auto result_event = create_event(stream, size, false);
     if (size == 0)
         return result_event;
@@ -210,6 +215,7 @@ event::ptr gpu_buffer::copy_from(stream& stream, const memory& src_mem, size_t s
 }
 
 event::ptr gpu_buffer::copy_to(stream& stream, void* data_ptr, size_t src_offset, size_t dst_offset, size_t size, bool blocking) const {
+    OV_ITT_SCOPED_TASK(ov::intel_gpu::itt::domains::intel_gpu_plugin, "gpu_buffer::copy_to_ptr");
     auto result_event = create_event(stream, size, blocking);
     if (size == 0)
         return result_event;
@@ -592,6 +598,7 @@ event::ptr gpu_usm::fill(stream& stream, const std::vector<event::ptr>& dep_even
 }
 
 event::ptr gpu_usm::copy_from(stream& stream, const void* data_ptr, size_t src_offset, size_t dst_offset, size_t size, bool blocking) {
+    OV_ITT_SCOPED_TASK(ov::intel_gpu::itt::domains::intel_gpu_plugin, "gpu_usm::copy_from_ptr");
     auto result_event = create_event(stream, size, blocking);
     if (size == 0)
         return result_event;
@@ -610,6 +617,7 @@ event::ptr gpu_usm::copy_from(stream& stream, const void* data_ptr, size_t src_o
 
 event::ptr gpu_usm::copy_from(stream& stream, const memory& src_mem, size_t src_offset, size_t dst_offset, size_t size, bool blocking) {
     auto result_event = create_event(stream, size, blocking);
+    OV_ITT_SCOPED_TASK(ov::intel_gpu::itt::domains::intel_gpu_plugin, "gpu_usm::copy_from_mem");
     if (size == 0)
         return result_event;
 
@@ -642,6 +650,7 @@ event::ptr gpu_usm::copy_from(stream& stream, const memory& src_mem, size_t src_
 }
 
 event::ptr gpu_usm::copy_to(stream& stream, void* data_ptr, size_t src_offset, size_t dst_offset, size_t size, bool blocking) const {
+    OV_ITT_SCOPED_TASK(ov::intel_gpu::itt::domains::intel_gpu_plugin, "gpu_usm::copy_to_ptr");
     auto result_event = create_event(stream, size, blocking);
     if (size == 0)
         return result_event;

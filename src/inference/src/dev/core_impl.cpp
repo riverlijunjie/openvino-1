@@ -859,6 +859,7 @@ ov::SoPtr<ov::ICompiledModel> ov::CoreImpl::compile_model(const std::shared_ptr<
         res = load_model_from_cache(cache_content, plugin, parsed.m_config, {}, [&]() {
             return compile_model_and_cache(plugin, model, parsed.m_config, {}, cache_content);
         });
+        OV_ITT_SCOPE(FIRST_INFERENCE, ov::itt::domains::LoadTime, "Core::compile_model::after_load_model_from_cache");
     } else {
         res = plugin.compile_model(model, parsed.m_config);
     }
@@ -1591,6 +1592,7 @@ ov::SoPtr<ov::ICompiledModel> ov::CoreImpl::load_model_from_cache(
                     }};
                 compiled_model = std::visit(model_importer, compiled_blob);
             });
+            OV_ITT_SCOPE(FIRST_INFERENCE, ov::itt::domains::LoadTime, "read_cache_entry_done");
     } catch (const HeaderException&) {
         // For these exceptions just remove old cache and set that import didn't work
         cacheContent.m_cache_manager->remove_cache_entry(cacheContent.m_blob_id);

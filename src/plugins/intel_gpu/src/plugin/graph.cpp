@@ -64,6 +64,7 @@ Graph::Graph(cldnn::BinaryInputBuffer &ib, const RemoteContextImpl::Ptr& context
     bool need_onednn_engine = false;
     ib >> need_onednn_engine;
     if (need_onednn_engine) {
+        OV_ITT_SCOPED_TASK(itt::domains::intel_gpu_plugin, "Graph::Graph::create_onednn_engine");
 #ifdef ENABLE_ONEDNN_FOR_GPU
         get_engine().create_onednn_engine(config);
 #else
@@ -77,6 +78,7 @@ Graph::Graph(cldnn::BinaryInputBuffer &ib, const RemoteContextImpl::Ptr& context
     ib >> prevPrimitiveIDs;
     ib >> profilingIDs;
     {
+        OV_ITT_SCOPED_TASK(itt::domains::intel_gpu_plugin, "Graph::Graph::primitive_id");
         size_t perfMap_size;
         ib >> perfMap_size;
         for (size_t i = 0; i < perfMap_size; ++i) {
@@ -98,8 +100,10 @@ Graph::Graph(cldnn::BinaryInputBuffer &ib, const RemoteContextImpl::Ptr& context
     m_config.set_user_property({ov::hint::model(std::shared_ptr<const ov::Model>(nullptr))});
     m_config.finalize(context.get(), nullptr);
 
+    OV_ITT_SCOPED_TASK(itt::domains::intel_gpu_plugin, "Graph::Graph::cldnn::program");
     auto imported_prog = std::make_shared<cldnn::program>(get_engine(), m_config);
     // Not passing MODEL_PTR through m_config because values in m_config are immutable after config finalization.
+    OV_ITT_SCOPED_TASK(itt::domains::intel_gpu_plugin, "Graph::Graph::cldnn::program::load");
     imported_prog->load(ib, config.get_model(), config.get_weightless_attr());
     build(imported_prog);
 }
