@@ -38,9 +38,7 @@ bool is_alloc_host_accessible(const cldnn::allocation_type& alloc_type) {
 void copy_to_dst_mem(cldnn::memory::ptr mem_ptr, const uint8_t* data_ptr) {
     if (is_alloc_host_accessible(mem_ptr->get_allocation_type())) {
         size_t data_size = mem_ptr->size();
-        std::memcpy(reinterpret_cast<uint8_t*>(mem_ptr->buffer_ptr()),
-                    data_ptr,
-                    data_size);
+        std::memcpy(reinterpret_cast<uint8_t*>(mem_ptr->buffer_ptr()), data_ptr, data_size);
     } else {
         auto& strm = mem_ptr->get_engine()->get_service_stream();
         mem_ptr->copy_from(strm, data_ptr);
@@ -53,8 +51,8 @@ namespace cldnn {
 
 class WeightsMemory {
 public:
-    WeightsMemory(std::shared_ptr<const ov::Model> model,
-                  std::shared_ptr<ov::intel_gpu::GpuWeightlessCacheMap> cache_attr_map = nullptr) : weights_memory(model) {
+    WeightsMemory(std::shared_ptr<const ov::Model> model, std::shared_ptr<ov::intel_gpu::GpuWeightlessCacheMap> cache_attr_map = nullptr)
+        : weights_memory(model) {
         fill_offset_to_constant_map(model, cache_attr_map);
     }
 
@@ -63,10 +61,7 @@ public:
     constant_memory_ptr get_constant_buf(size_t bin_offset, size_t original_size) {
         if (std::holds_alternative<std::shared_ptr<ov::MappedMemory>>(weights_memory)) {
             auto mapped_memory = std::get<std::shared_ptr<ov::MappedMemory>>(weights_memory);
-            return std::make_shared<ov::SharedBuffer<std::shared_ptr<ov::MappedMemory>>>(
-                mapped_memory->data() + bin_offset,
-                original_size,
-                mapped_memory);
+            return std::make_shared<ov::SharedBuffer<std::shared_ptr<ov::MappedMemory>>>(mapped_memory->data() + bin_offset, original_size, mapped_memory);
         } else {
             auto model_ptr = std::get<std::shared_ptr<const ov::Model>>(weights_memory);
             auto const_it = offset_to_constant_map.find(bin_offset);
@@ -79,8 +74,7 @@ public:
     }
 
 private:
-    void fill_offset_to_constant_map(std::shared_ptr<const ov::Model> model,
-                                     std::shared_ptr<ov::intel_gpu::GpuWeightlessCacheMap> cache_attr_map = nullptr) {
+    void fill_offset_to_constant_map(std::shared_ptr<const ov::Model> model, std::shared_ptr<ov::intel_gpu::GpuWeightlessCacheMap> cache_attr_map = nullptr) {
         const auto& ops = model->get_ops();
 
         if (cache_attr_map != nullptr && cache_attr_map->size() > 0) {
@@ -122,11 +116,7 @@ struct reorder_replication {
 };
 
 struct weightless_cache_manager {
-    void set_constant_info(size_t bin_offset,
-                           size_t original_size,
-                           ov::element::Type original_dtype,
-                           ov::element::Type curr_dtype,
-                           ov::Shape shape) {
+    void set_constant_info(size_t bin_offset, size_t original_size, ov::element::Type original_dtype, ov::element::Type curr_dtype, ov::Shape shape) {
         this->bin_offset = bin_offset;
         this->original_size = original_size;
         this->original_dtype = original_dtype;
@@ -220,7 +210,6 @@ struct weightless_cache_manager {
         return true;
     }
 
-
 private:
     bool do_weightless_caching = false;
     bool do_precision_conversion = false;
@@ -240,9 +229,7 @@ private:
         return do_precision_conversion || should_run_reorder();
     }
 
-    void run_transformations(engine& engine,
-                             memory::ptr dst_mem,
-                             constant_memory_ptr constant_ptr) {
+    void run_transformations(engine& engine, memory::ptr dst_mem, constant_memory_ptr constant_ptr) {
         std::shared_ptr<ov::op::v0::Constant> transformed_constant = nullptr;
 
         // Note: this works only until the data is copied to dst_mem.
@@ -274,8 +261,7 @@ private:
                 orig_constant = std::get<std::shared_ptr<ov::op::v0::Constant>>(constant_ptr);
             } else {
                 auto shared_buf = std::get<shared_mapped_memory_ptr>(constant_ptr);
-                orig_constant =
-                    std::make_shared<ov::op::v0::Constant>(original_dtype, shape, get_intermediate_data(), shared_buf);
+                orig_constant = std::make_shared<ov::op::v0::Constant>(original_dtype, shape, get_intermediate_data(), shared_buf);
             }
 
             ov::ParameterVector inputParams;
@@ -303,17 +289,14 @@ private:
             memory::ptr input_mem = engine.allocate_memory(*reorder_rep.input_layout, allocation_type, false);
 
             if (is_alloc_host_accessible(allocation_type)) {
-                std::memcpy(reinterpret_cast<uint8_t*>(input_mem->buffer_ptr()),
-                            get_intermediate_data(),
-                            get_current_data_size());
+                std::memcpy(reinterpret_cast<uint8_t*>(input_mem->buffer_ptr()), get_intermediate_data(), get_current_data_size());
             } else {
                 auto& strm = engine.get_service_stream();
                 input_mem->copy_from(strm, get_intermediate_data());
             }
 
             reorder_rep.reorder->input = {input_info("input")};
-            topology topology(input_layout("input", *reorder_rep.input_layout),
-                              *reorder_rep.reorder);
+            topology topology(input_layout("input", *reorder_rep.input_layout), *reorder_rep.reorder);
 
             ExecutionConfig config;
             config.set_property(ov::intel_gpu::optimize_data(false));
@@ -422,15 +405,20 @@ struct data : public primitive_base<data> {
             if (is_alloc_host_accessible(_allocation_type)) {
                 ib >> make_data(mem->buffer_ptr(), data_size);
             } else {
-                const size_t DATA_BLOCK_SIZE = 2 * 1024 * 1024;
+                const size_t DATA_BLOCK_SIZE = 4 * 1024 * 1024;
                 auto& strm = ib.get_engine().get_service_stream();
                 if (data_size < DATA_BLOCK_SIZE || output_layout.format.is_image_2d()) {
-                    std::vector<uint8_t> _buf(data_size);
-                    ib >> make_data(_buf.data(), data_size);
-                    mem->copy_from(strm, _buf.data());
+                    layout block_layout(ov::PartialShape{static_cast<int64_t>(data_size)}, data_types::u8, format::bfyx);
+                    auto buf_mem = ib.get_engine().allocate_memory(block_layout, allocation_type::usm_host, false);
+                    uint8_t* _buf = reinterpret_cast<uint8_t*>(buf_mem->buffer_ptr());
+                    ib >> make_data(_buf, data_size);
+                    mem->copy_from(strm, _buf);
                 } else {
-                    std::vector<uint8_t> _buf1(DATA_BLOCK_SIZE);
-                    std::vector<uint8_t> _buf2(DATA_BLOCK_SIZE);
+                    layout block_layout(ov::PartialShape{static_cast<int64_t>(DATA_BLOCK_SIZE)}, data_types::u8, format::bfyx);
+                    auto buf1_mem = ib.get_engine().allocate_memory(block_layout, allocation_type::usm_host, false);
+                    auto buf2_mem = ib.get_engine().allocate_memory(block_layout, allocation_type::usm_host, false);
+                    uint8_t* _buf1 = reinterpret_cast<uint8_t*>(buf1_mem->buffer_ptr());
+                    uint8_t* _buf2 = reinterpret_cast<uint8_t*>(buf2_mem->buffer_ptr());
                     bool buf_flag = true;
                     event::ptr ev1, ev2;
                     ev1 = ev2 = nullptr;
@@ -438,22 +426,21 @@ struct data : public primitive_base<data> {
                     while (dst_offset < data_size) {
                         const bool is_blocking = false;
                         const size_t src_offset = 0;
-                        size_t copy_size =
-                            (data_size > (dst_offset + DATA_BLOCK_SIZE)) ? DATA_BLOCK_SIZE : (data_size - dst_offset);
+                        size_t copy_size = (data_size > (dst_offset + DATA_BLOCK_SIZE)) ? DATA_BLOCK_SIZE : (data_size - dst_offset);
                         if (buf_flag) {
-                            ib >> make_data(_buf1.data(), copy_size);
+                            ib >> make_data(_buf1, copy_size);
                             if (ev2 != nullptr) {
                                 ev2->wait();
                                 ev2 = nullptr;
                             }
-                            ev1 = mem->copy_from(strm, _buf1.data(), src_offset, dst_offset, copy_size, is_blocking);
+                            ev1 = mem->copy_from(strm, _buf1, src_offset, dst_offset, copy_size, is_blocking);
                         } else {
-                            ib >> make_data(_buf2.data(), copy_size);
+                            ib >> make_data(_buf2, copy_size);
                             if (ev1 != nullptr) {
                                 ev1->wait();
                                 ev1 = nullptr;
                             }
-                            ev2 = mem->copy_from(strm, _buf2.data(), src_offset, dst_offset, copy_size, is_blocking);
+                            ev2 = mem->copy_from(strm, _buf2, src_offset, dst_offset, copy_size, is_blocking);
                         }
                         dst_offset += DATA_BLOCK_SIZE;
                         buf_flag = !buf_flag;

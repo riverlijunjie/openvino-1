@@ -115,6 +115,9 @@ protected:
 class SharedStreamBuffer : public std::streambuf {
 public:
     SharedStreamBuffer(const char* data, size_t size) : m_data(data), m_size(size), m_offset(0) {}
+    const char* get_ptr() const { return m_data; }
+    size_t size() const { return m_size; }
+
     explicit SharedStreamBuffer(const void* data, size_t size)
         : SharedStreamBuffer(reinterpret_cast<const char*>(data), size) {}
 

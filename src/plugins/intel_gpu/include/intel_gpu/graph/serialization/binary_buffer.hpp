@@ -11,6 +11,8 @@
 #include "buffer.hpp"
 #include "helpers.hpp"
 #include "bind.hpp"
+#include "openvino/runtime/shared_buffer.hpp"
+#include "openvino/core/parallel.hpp"
 
 namespace cldnn {
 struct memory;
@@ -50,9 +52,28 @@ public:
     virtual ~BinaryInputBuffer() = default;
 
     virtual void read(void* const data, std::streamsize size) {
-        auto const read_size = _stream.rdbuf()->sgetn(reinterpret_cast<char*>(data), size);
-        OPENVINO_ASSERT(read_size == size,
-            "[GPU] Failed to read " + std::to_string(size) + " bytes from stream! Read " + std::to_string(read_size));
+        if (auto shared_buf = dynamic_cast<ov::SharedStreamBuffer*>(_stream.rdbuf())) {
+            const std::streamsize PARALLEL_MEMCPY_THRESHOLD = 2 * 1024 * 1024;
+            if (size >= PARALLEL_MEMCPY_THRESHOLD) {
+                const char* src_ptr = shared_buf->get_ptr();
+                size_t total_size = shared_buf->size();
+                auto cur_offset = _stream.tellg();
+                if (cur_offset != -1 && static_cast<size_t>(cur_offset) + size <= total_size) {
+                    const char* src_data = src_ptr + cur_offset;
+                    const size_t chunk_size = 2 * 1024 * 1024;
+                    const size_t num_chunks = (size + chunk_size - 1) / chunk_size;
+                    ov::parallel_for(num_chunks, [&](size_t chunk_idx) {
+                        size_t offset = chunk_idx * chunk_size;
+                        size_t current_chunk_size = std::min<size_t>(chunk_size, size - offset);
+                        std::memcpy(static_cast<char*>(data) + offset, src_data + offset, current_chunk_size);
+                    });
+                    _stream.seekg(size, std::ios_base::cur);
+                    return;
+                }
+            }
+        }
+        const auto read_size = _stream.rdbuf()->sgetn(reinterpret_cast<char*>(data), size);
+        OPENVINO_ASSERT(read_size == size, "[GPU] Failed to read " + std::to_string(size) + " bytes to stream! Read " + std::to_string(read_size));
     }
 
     void setKernelImplParams(void* impl_params) { _impl_params = impl_params; }
