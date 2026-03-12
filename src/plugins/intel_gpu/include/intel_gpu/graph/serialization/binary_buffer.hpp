@@ -10,8 +10,17 @@
 #include <vector>
 #include "buffer.hpp"
 #include "helpers.hpp"
+#include <thread>
 #include "bind.hpp"
 #include "openvino/runtime/shared_buffer.hpp"
+#include "openvino/core/parallel.hpp"
+#ifdef __linux__
+#    include <sys/mman.h>
+#endif
+#ifdef _WIN32
+#    include <windows.h>
+#    include <memoryapi.h>
+#endif
 #include "openvino/core/parallel.hpp"
 
 namespace cldnn {
@@ -60,8 +69,25 @@ public:
                 auto cur_offset = _stream.tellg();
                 if (cur_offset != -1 && static_cast<size_t>(cur_offset) + size <= total_size) {
                     const char* src_data = src_ptr + cur_offset;
-                    const size_t chunk_size = 2 * 1024 * 1024;
+                    // Trigger OS asynchronous prefetching to bypass mmap page-fault serialization lock (mmap_sem/mmap_lock)
+#ifdef __linux__
+                    madvise(const_cast<char*>(src_data), size, MADV_WILLNEED);
+#elif defined(_WIN32)
+                    WIN32_MEMORY_RANGE_ENTRY memRange;
+                    memRange.VirtualAddress = const_cast<char*>(src_data);
+                    memRange.NumberOfBytes = size;
+                    PrefetchVirtualMemory(GetCurrentProcess(), 1, &memRange, 0);
+#endif
+
+                    // Use fine-grained dynamic chunks to maximize hardware threads for small requests (like 4MB dGPU pipeline)
+                    size_t hardware_concurrency = std::thread::hardware_concurrency();
+                    if (hardware_concurrency < 1) hardware_concurrency = 1;
+                    
+                    // Aim for at least 128KB chunks to avoid excessive thread overhead, but no larger than size/threads
+                    const size_t min_chunk_size = 128 * 1024;
+                    const size_t chunk_size = std::max(min_chunk_size, static_cast<size_t>(size / hardware_concurrency));
                     const size_t num_chunks = (size + chunk_size - 1) / chunk_size;
+
                     ov::parallel_for(num_chunks, [&](size_t chunk_idx) {
                         size_t offset = chunk_idx * chunk_size;
                         size_t current_chunk_size = std::min<size_t>(chunk_size, size - offset);
