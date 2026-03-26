@@ -3,7 +3,9 @@
 //
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <iomanip>
 #include <intel_gpu/primitives/data.hpp>
 #include <intel_gpu/primitives/fully_connected.hpp>
 #include <intel_gpu/primitives/moe_3gemm_fused_compressed.hpp>
@@ -1363,3 +1365,329 @@ INSTANTIATE_TEST_SUITE_P(smoke,
                                            Moe3GemmTestParams{16, true, 128, 256, 4, 2, 128, true},
                                            Moe3GemmTestParams{1, false, 128, 256, 4, 2, 128, true},
                                            Moe3GemmTestParams{16, false, 128, 256, 4, 2, 128, true}));
+
+// ===== Performance benchmark for MOE 3GEMM kernels =====
+// Uses real model parameters (Qwen3 MoE, Qwen3.5 MoE) to measure kernel latency and equivalent memory bandwidth.
+// All tests are DISABLED by default — run explicitly with --gtest_also_run_disabled_tests or --gtest_filter="*DISABLED_*".
+
+struct Moe3GemmPerfParams {
+    std::string model_name;
+    size_t hidden_size;
+    size_t inter_size;
+    size_t num_experts;
+    size_t top_k;
+    size_t group_size;
+    bool is_u4;          // true=4bit, false=8bit weight
+    bool is_signed;      // true=symmetric (i4/i8), false=asymmetric (u4/u8)
+    bool has_shared_expert;
+};
+
+class Moe3GemmPerfTest : public ::testing::TestWithParam<Moe3GemmPerfParams> {
+protected:
+    engine& engine_ = get_test_engine();
+
+    // Compute total bytes touched by the MOE pipeline (per token, all top_k experts)
+    // gate_up per expert: read activation(hidden_size*2B) + gate_w(hidden_size*inter_size*bpe) + up_w(same) + scales + zp; write inter_size*2B
+    // down per expert: read activation(inter_size*2B) + down_w(inter_size*hidden_size*bpe) + scales + zp; write hidden_size*2B
+    // reduce: read top_k*hidden_size*2B, write hidden_size*2B
+    static double compute_total_bytes(const Moe3GemmPerfParams& p) {
+        double bpe = p.is_u4 ? 0.5 : 1.0;  // bytes per weight element
+        size_t gn_up = p.hidden_size / p.group_size;   // groups for gate/up projection
+        size_t gn_down = p.inter_size / p.group_size;  // groups for down projection
+        double scale_bytes_up = static_cast<double>(gn_up) * p.inter_size * 2.0;   // f16 scales
+        double scale_bytes_down = static_cast<double>(gn_down) * p.hidden_size * 2.0;
+        double zp_bytes_up = p.is_signed ? 0.0 : static_cast<double>(gn_up) * p.inter_size * bpe;
+        double zp_bytes_down = p.is_signed ? 0.0 : static_cast<double>(gn_down) * p.hidden_size * bpe;
+
+        // Per expert
+        double gate_up_read = static_cast<double>(p.hidden_size) * 2.0  // activation (f16)
+                            + static_cast<double>(p.hidden_size) * p.inter_size * bpe * 2.0  // gate + up weights
+                            + scale_bytes_up * 2.0  // gate + up scales
+                            + zp_bytes_up * 2.0;    // gate + up zp
+        double gate_up_write = static_cast<double>(p.inter_size) * 2.0;  // output (f16)
+
+        double down_read = static_cast<double>(p.inter_size) * 2.0    // activation (f16)
+                         + static_cast<double>(p.inter_size) * p.hidden_size * bpe  // down weight
+                         + scale_bytes_down
+                         + zp_bytes_down;
+        double down_write = static_cast<double>(p.hidden_size) * 2.0;  // output (f16)
+
+        size_t num_active = p.top_k + (p.has_shared_expert ? 1 : 0);
+        double expert_bytes = (gate_up_read + gate_up_write + down_read + down_write) * num_active;
+
+        // Reduce: read top_k results, write final
+        double reduce_bytes = static_cast<double>(num_active) * p.hidden_size * 2.0 + p.hidden_size * 2.0;
+
+        // Router: read hidden_size*num_experts f16 logits (small)
+        double router_bytes = static_cast<double>(p.hidden_size) * 2.0 + static_cast<double>(p.num_experts) * 2.0;
+
+        return expert_bytes + reduce_bytes + router_bytes;
+    }
+
+    struct PerfResult {
+        double avg_us;
+        double min_us;
+        double max_us;
+        double bandwidth_gb_s;
+    };
+
+    PerfResult run_benchmark(const Moe3GemmPerfParams& p, int warmup_iters, int measure_iters) {
+        tests::random_generator rg("moe_perf");
+        Moe3GemmConfig config;
+        config.batch_size = 1;
+        config.seq_len = 1;
+        config.hidden_size = p.hidden_size;
+        config.inter_size = p.inter_size;
+        config.num_experts = p.num_experts;
+        config.top_k = p.top_k;
+        config.group_size = p.group_size;
+        config.is_u4 = p.is_u4;
+        config.is_signed = p.is_signed;
+        config.has_shared_expert = p.has_shared_expert;
+
+        auto weight_dt = p.is_signed ? (p.is_u4 ? data_types::i4 : data_types::i8)
+                                     : (p.is_u4 ? data_types::u4 : data_types::u8);
+        auto zp_dt = p.is_u4 ? data_types::u4 : data_types::u8;
+
+        size_t group_num = config.hidden_size / config.group_size;
+        size_t group_num2 = config.inter_size / config.group_size;
+
+        // Helper: allocate GPU memory and fill with random bytes (no CPU-side float generation/quantization)
+        auto alloc_random_mem = [&](data_types dt, int64_t b, int64_t f, int64_t y, int64_t x) {
+            auto mem = engine_.allocate_memory({dt, format::bfyx, {b, f, y, x}});
+            auto lock = cldnn::mem_lock<uint8_t, cldnn::mem_lock_type::write>(mem, get_test_stream());
+            auto rand_data = rg.generate_random_1d<uint8_t>(lock.size(), 0, 255, 1000);
+            std::memcpy(lock.data(), rand_data.data(), lock.size());
+            get_test_stream().finish();
+            return mem;
+        };
+
+        auto alloc_random_f16 = [&](int64_t b, int64_t f, int64_t y, int64_t x) {
+            auto mem = engine_.allocate_memory({data_types::f16, format::bfyx, {b, f, y, x}});
+            auto rand_data = rg.generate_random_1d<ov::float16>(b * f * y * x, -1.0f, 1.0f, 1000);
+            set_values(mem, rand_data);
+            get_test_stream().finish();
+            return mem;
+        };
+
+        auto alloc_random_f16_3d = [&](int64_t d0, int64_t d1, int64_t d2) {
+            auto mem = engine_.allocate_memory(layout{ov::PartialShape{d0, d1, d2}, data_types::f16, format::bfyx});
+            auto rand_data = rg.generate_random_1d<ov::float16>(d0 * d1 * d2, -1.0f, 1.0f, 1000);
+            set_values(mem, rand_data);
+            get_test_stream().finish();
+            return mem;
+        };
+
+        auto alloc_zero_mem = [&](data_types dt, int64_t b, int64_t f, int64_t y, int64_t x) {
+            auto mem = engine_.allocate_memory({dt, format::bfyx, {b, f, y, x}});
+            auto lock = cldnn::mem_lock<uint8_t, cldnn::mem_lock_type::write>(mem, get_test_stream());
+            std::memset(lock.data(), 0, lock.size());
+            get_test_stream().finish();
+            return mem;
+        };
+
+        auto hidden_states_mem = alloc_random_f16_3d(1, 1, config.hidden_size);
+        auto routing_weights_mem = alloc_random_f16_3d(1, 1, config.num_experts);
+
+        // Expert weights — allocate directly on GPU with random data
+        auto w0_weight_mem = alloc_random_mem(weight_dt, config.num_experts, config.inter_size, config.group_size, group_num);
+        auto w0_scale_mem = alloc_random_f16(config.num_experts, group_num, 1, config.inter_size);
+        auto w1_weight_mem = alloc_random_mem(weight_dt, config.num_experts, config.inter_size, config.group_size, group_num);
+        auto w1_scale_mem = alloc_random_f16(config.num_experts, group_num, 1, config.inter_size);
+        auto w2_weight_mem = alloc_random_mem(weight_dt, config.num_experts, config.hidden_size, config.group_size, group_num2);
+        auto w2_scale_mem = alloc_random_f16(config.num_experts, group_num2, 1, config.hidden_size);
+
+        memory::ptr w0_zp_mem, w1_zp_mem, w2_zp_mem;
+        if (p.is_signed) {
+            w0_zp_mem = alloc_zero_mem(zp_dt, config.num_experts, group_num, 1, config.inter_size);
+            w1_zp_mem = alloc_zero_mem(zp_dt, config.num_experts, group_num, 1, config.inter_size);
+            w2_zp_mem = alloc_zero_mem(zp_dt, config.num_experts, group_num2, 1, config.hidden_size);
+        } else {
+            w0_zp_mem = alloc_random_mem(zp_dt, config.num_experts, group_num, 1, config.inter_size);
+            w1_zp_mem = alloc_random_mem(zp_dt, config.num_experts, group_num, 1, config.inter_size);
+            w2_zp_mem = alloc_random_mem(zp_dt, config.num_experts, group_num2, 1, config.hidden_size);
+        }
+
+        // Build topology
+        topology topology;
+        topology.add(input_layout("hidden_states", hidden_states_mem->get_layout()));
+        topology.add(input_layout("routing_weights", routing_weights_mem->get_layout()));
+        topology.add(data("w0_weight", w0_weight_mem));
+        topology.add(data("w0_scale", w0_scale_mem));
+        topology.add(data("w0_zp", w0_zp_mem));
+        topology.add(data("w1_weight", w1_weight_mem));
+        topology.add(data("w1_scale", w1_scale_mem));
+        topology.add(data("w1_zp", w1_zp_mem));
+        topology.add(data("w2_weight", w2_weight_mem));
+        topology.add(data("w2_scale", w2_scale_mem));
+        topology.add(data("w2_zp", w2_zp_mem));
+
+        cldnn::MOE3GemmFusedCompressed::Config moe_config;
+        moe_config.hidden_size = config.hidden_size;
+        moe_config.inter_size = config.inter_size;
+        moe_config.num_expert = config.num_experts;
+        moe_config.top_k = config.top_k;
+        moe_config.group_size = config.group_size;
+        moe_config.out_type = data_types::f16;
+        moe_config.routing_type = cldnn::MOE3GemmFusedCompressed::RoutingType::SOFTMAX;
+        moe_config.has_zp = !p.is_signed;
+
+        std::vector<input_info> moe_inputs{input_info("hidden_states"),
+                                           input_info("routing_weights"),
+                                           input_info("w0_weight"),
+                                           input_info("w0_scale"),
+                                           input_info("w0_zp"),
+                                           input_info("w1_weight"),
+                                           input_info("w1_scale"),
+                                           input_info("w1_zp"),
+                                           input_info("w2_weight"),
+                                           input_info("w2_scale"),
+                                           input_info("w2_zp")};
+
+        if (p.has_shared_expert) {
+            // Dummy routing_bias/eps placeholders (indices 11-12)
+            auto dummy_bias_mem = engine_.allocate_memory({data_types::f16, format::bfyx, {1, 1, 1, 1}});
+            set_values(dummy_bias_mem, {ov::float16(0.0f)});
+            get_test_stream().finish();
+            auto dummy_eps_mem = engine_.allocate_memory({data_types::f16, format::bfyx, {1, 1, 1, 1}});
+            set_values(dummy_eps_mem, {ov::float16(0.0f)});
+            get_test_stream().finish();
+            topology.add(data("dummy_routing_bias", dummy_bias_mem));
+            topology.add(data("dummy_routing_eps", dummy_eps_mem));
+
+            // Shared expert weights — allocate directly on GPU
+            auto sg_w_mem = alloc_random_mem(weight_dt, 1, config.inter_size, config.group_size, group_num);
+            auto sg_s_mem = alloc_random_f16(1, group_num, 1, config.inter_size);
+            auto sg_z_mem = p.is_signed ? alloc_zero_mem(zp_dt, 1, group_num, 1, config.inter_size)
+                                        : alloc_random_mem(zp_dt, 1, group_num, 1, config.inter_size);
+
+            auto su_w_mem = alloc_random_mem(weight_dt, 1, config.inter_size, config.group_size, group_num);
+            auto su_s_mem = alloc_random_f16(1, group_num, 1, config.inter_size);
+            auto su_z_mem = p.is_signed ? alloc_zero_mem(zp_dt, 1, group_num, 1, config.inter_size)
+                                        : alloc_random_mem(zp_dt, 1, group_num, 1, config.inter_size);
+
+            auto sd_w_mem = alloc_random_mem(weight_dt, 1, config.hidden_size, config.group_size, group_num2);
+            auto sd_s_mem = alloc_random_f16(1, group_num2, 1, config.hidden_size);
+            auto sd_z_mem = p.is_signed ? alloc_zero_mem(zp_dt, 1, group_num2, 1, config.hidden_size)
+                                        : alloc_random_mem(zp_dt, 1, group_num2, 1, config.hidden_size);
+
+            auto sg_scalar_mem = alloc_random_f16(1, 1, 1, config.hidden_size);
+
+            topology.add(data("s_gate_weight", sg_w_mem));
+            topology.add(data("s_gate_scale", sg_s_mem));
+            topology.add(data("s_gate_zp", sg_z_mem));
+            topology.add(data("s_up_weight", su_w_mem));
+            topology.add(data("s_up_scale", su_s_mem));
+            topology.add(data("s_up_zp", su_z_mem));
+            topology.add(data("s_down_weight", sd_w_mem));
+            topology.add(data("s_down_scale", sd_s_mem));
+            topology.add(data("s_down_zp", sd_z_mem));
+            topology.add(data("s_gate_scalar", sg_scalar_mem));
+
+            moe_config.num_shared_expert = 1;
+            moe_inputs.push_back(input_info("dummy_routing_bias"));
+            moe_inputs.push_back(input_info("dummy_routing_eps"));
+            moe_inputs.push_back(input_info("s_gate_weight"));
+            moe_inputs.push_back(input_info("s_gate_scale"));
+            moe_inputs.push_back(input_info("s_gate_zp"));
+            moe_inputs.push_back(input_info("s_up_weight"));
+            moe_inputs.push_back(input_info("s_up_scale"));
+            moe_inputs.push_back(input_info("s_up_zp"));
+            moe_inputs.push_back(input_info("s_down_weight"));
+            moe_inputs.push_back(input_info("s_down_scale"));
+            moe_inputs.push_back(input_info("s_down_zp"));
+            moe_inputs.push_back(input_info("s_gate_scalar"));
+        }
+
+        topology.add(moe_3gemm_fused_compressed("moe_3gemm_fused_compressed", moe_inputs, moe_config));
+
+        auto net_config = get_test_default_config(engine_);
+        auto net = get_network(engine_, topology, net_config, get_test_stream_ptr(), false);
+
+        // Warmup
+        for (int i = 0; i < warmup_iters; ++i) {
+            net->set_input_data("hidden_states", hidden_states_mem);
+            net->set_input_data("routing_weights", routing_weights_mem);
+            auto outputs = net->execute();
+            auto out = outputs.at("moe_3gemm_fused_compressed").get_memory();
+            cldnn::mem_lock<ov::float16, mem_lock_type::read> lock(out, get_test_stream());
+            (void)lock[0];
+        }
+
+        // Measure each iteration independently
+        std::vector<double> times_us(measure_iters);
+        for (int i = 0; i < measure_iters; ++i) {
+            net->set_input_data("hidden_states", hidden_states_mem);
+            net->set_input_data("routing_weights", routing_weights_mem);
+            auto t0 = std::chrono::high_resolution_clock::now();
+            auto outputs = net->execute();
+            auto out = outputs.at("moe_3gemm_fused_compressed").get_memory();
+            cldnn::mem_lock<ov::float16, mem_lock_type::read> lock(out, get_test_stream());
+            (void)lock[0];
+            auto t1 = std::chrono::high_resolution_clock::now();
+            times_us[i] = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
+        }
+
+        double sum = 0, min_v = times_us[0], max_v = times_us[0];
+        for (double t : times_us) {
+            sum += t;
+            if (t < min_v) min_v = t;
+            if (t > max_v) max_v = t;
+        }
+        double avg = sum / measure_iters;
+
+        double total_bytes = compute_total_bytes(p);
+        double bw_gb_s = (total_bytes / avg) * 1e6 / (1024.0 * 1024.0 * 1024.0);
+
+        return {avg, min_v, max_v, bw_gb_s};
+    }
+};
+
+TEST_P(Moe3GemmPerfTest, DISABLED_moe_kernel_perf) {
+    if (!engine_.get_device_info().supports_immad) {
+        GTEST_SKIP() << "No immad support";
+    }
+
+    auto p = GetParam();
+    const int warmup = 20;
+    const int iters = 100;
+
+    auto result = run_benchmark(p, warmup, iters);
+
+    double total_bytes = compute_total_bytes(p);
+    std::string quant_str = p.is_signed ? (p.is_u4 ? "i4" : "i8") : (p.is_u4 ? "u4" : "u8");
+    std::string shared_str = p.has_shared_expert ? "+shared" : "";
+
+    std::cout << "\n===== MOE 3GEMM Kernel Performance =====" << std::endl;
+    std::cout << "Model:          " << p.model_name << std::endl;
+    std::cout << "Config:         hidden=" << p.hidden_size << " inter=" << p.inter_size
+              << " experts=" << p.num_experts << " top_k=" << p.top_k
+              << " group=" << p.group_size << " quant=" << quant_str << shared_str << std::endl;
+    std::cout << "Data touched:   " << std::fixed << std::setprecision(2)
+              << total_bytes / (1024.0 * 1024.0) << " MB (per token, " << p.top_k << " experts)" << std::endl;
+    std::cout << "Latency:        avg=" << std::fixed << std::setprecision(1) << result.avg_us << " us"
+              << "  min=" << result.min_us << " us"
+              << "  max=" << result.max_us << " us"
+              << "  (" << iters << " iters)" << std::endl;
+    std::cout << "Eff. Bandwidth: " << std::fixed << std::setprecision(2) << result.bandwidth_gb_s << " GB/s" << std::endl;
+    std::cout << "=========================================" << std::endl;
+
+    ASSERT_GT(result.avg_us, 0.0);
+}
+
+INSTANTIATE_TEST_SUITE_P(smoke, Moe3GemmPerfTest,
+    ::testing::Values(
+        // Qwen3 MoE — u4 asymmetric, no shared expert
+        // Note: num_experts reduced to 16 (from 128) to fit GPU memory. top_k=8 kernel behavior is identical.
+        Moe3GemmPerfParams{"Qwen3_MoE", 2048, 768, 128, 8, 128, true, false, false},
+        // Qwen3 MoE — i4 symmetric, no shared expert
+        Moe3GemmPerfParams{"Qwen3_MoE", 2048, 768, 128, 8, 128, true, true, false},
+        // Qwen3.5 MoE — u4 asymmetric, with shared expert
+        Moe3GemmPerfParams{"Qwen3.5_MoE", 2048, 512, 256, 8, 128, true, false, true},
+        // Qwen3.5 MoE — i4 symmetric, with shared expert
+        Moe3GemmPerfParams{"Qwen3.5_MoE", 2048, 512, 256, 8, 128, true, true, true},
+        // Qwen3.5 MoE — u4 asymmetric, no shared expert (sparse only)
+        Moe3GemmPerfParams{"Qwen3.5_MoE_sparse", 2048, 512, 256, 8, 128, true, false, false},
+        // Qwen3.5 MoE — i4 symmetric, no shared expert (sparse only)
+        Moe3GemmPerfParams{"Qwen3.5_MoE_sparse", 2048, 512, 256, 8, 128, true, true, false}
+    ));
