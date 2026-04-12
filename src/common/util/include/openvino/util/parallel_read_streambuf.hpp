@@ -60,8 +60,11 @@ protected:
 private:
     bool single_read(char* dst, size_t size, size_t file_offset);
     bool parallel_read(char* dst, size_t size, size_t file_offset);
-
-    static constexpr size_t UNDERFLOW_BUF = 8192;  ///< batch size for char-by-char reads
+    /// Try to serve @p n bytes from the read-ahead buffer.  Returns the number
+    /// of bytes copied (may be 0 if the buffer doesn't cover the current offset).
+    std::streamsize serve_from_readahead(char_type*& dst, std::streamsize& n);
+    /// Refill the read-ahead buffer starting at m_file_offset.
+    bool refill_readahead();
 
     std::filesystem::path m_path;
     FileHandle m_handle;  ///< platform file handle
@@ -70,7 +73,10 @@ private:
     std::streamoff m_header_offset = 0;  ///< absolute file offset of logical stream start
     std::streamoff m_file_size = 0;
     size_t m_threshold = default_parallel_io_threshold;
-    std::unique_ptr<char_type[]> m_underflow_buf;  ///< lazily allocated buffer for underflow()
+
+    std::unique_ptr<char_type[]> m_ra_buf;  ///< lazily allocated read-ahead buffer
+    size_t m_ra_buf_start = 0;  ///< absolute file offset of first byte in m_ra_buf
+    size_t m_ra_buf_end = 0;    ///< absolute file offset one past last valid byte
 };
 
 }  // namespace ov::util

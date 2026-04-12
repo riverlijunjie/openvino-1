@@ -4,6 +4,7 @@
 
 #include "openvino/util/parallel_io.hpp"
 
+#include <errno.h>
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -56,7 +57,16 @@ bool positional_read(FileHandle handle, char* dst, size_t size, size_t file_offs
     off_t cur_offset = static_cast<off_t>(file_offset);
     while (remaining > 0) {
         const ssize_t n = ::pread(handle, cur, remaining, cur_offset);
-        if (n <= 0) {
+        if (n < 0) {
+            // pread() interrupted by a signal is not a real I/O error.
+            // Retry the syscall instead of propagating a spurious failure.
+            // Common signals that trigger EINTR: SIGALRM, SIGCHLD, SIGIO, etc.
+            if (errno == EINTR)
+                continue;
+            return false;
+        }
+        if (n == 0) {
+            // Unexpected EOF before all bytes were read.
             return false;
         }
         cur += n;

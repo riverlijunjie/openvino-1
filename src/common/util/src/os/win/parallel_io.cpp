@@ -12,6 +12,7 @@
 // clang-format on
 
 #include <cstdint>
+#include <algorithm>
 #include <stdexcept>
 
 #include "openvino/util/file_util.hpp"

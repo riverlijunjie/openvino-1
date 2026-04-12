@@ -17,6 +17,7 @@
 #include "openvino/runtime/shared_buffer.hpp"
 #include "openvino/util/file_util.hpp"
 #include "openvino/util/mmap_object.hpp"
+#include "openvino/util/parallel_read_streambuf.hpp"
 #include "openvino/util/xml_parse_utils.hpp"
 #include "transformations/resolve_names_collisions.hpp"
 #include "utils.hpp"
@@ -221,7 +222,9 @@ InputModel::Ptr FrontEnd::load_impl(const std::vector<ov::Any>& variants) const 
             weights = std::make_shared<ov::SharedBuffer<std::shared_ptr<MappedMemory>>>(mapped_memory->data(),
                                                                                         mapped_memory->size(),
                                                                                         mapped_memory);
-        } else if (std::ifstream bin_stream(weights_path, std::ios::binary); bin_stream.is_open()) {
+        } else {
+            ov::util::ParallelReadStreamBuf read_buf(weights_path, 0);
+            std::istream bin_stream(&read_buf);
             bin_stream.seekg(0, std::ios::end);
             size_t file_size = bin_stream.tellg();
             bin_stream.seekg(0, std::ios::beg);
@@ -237,9 +240,6 @@ InputModel::Ptr FrontEnd::load_impl(const std::vector<ov::Any>& variants) const 
                     std::hash<std::decay_t<decltype(weights_path.native())>>{}(weights_path.native()),
                     0,
                     aligned_weights_buffer));
-
-        } else {
-            OPENVINO_THROW("Weights file ", weights_path, " cannot be opened!");
         }
     }
 

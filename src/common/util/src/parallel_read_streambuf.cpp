@@ -9,6 +9,8 @@
 #        define NOMINMAX
 #    endif
 #    include <windows.h>
+#else
+#    include <fcntl.h>  // posix_fadvise
 #endif
 
 #include <algorithm>
@@ -32,10 +34,58 @@ ParallelReadStreamBuf::ParallelReadStreamBuf(const std::filesystem::path& path,
       m_header_offset(header_offset),
       m_threshold(threshold) {
     get_file_handle_and_size(path, m_file_offset, m_handle, m_file_size);
+
+    // Advise the kernel to prefetch the blob region into pagecache
+    // asynchronously.  This makes subsequent small pread() calls hit warm
+    // cache instead of blocking on disk I/O.
+    const auto advise_offset = static_cast<size_t>(m_header_offset);
+    const auto advise_len = static_cast<size_t>(m_file_size - m_header_offset);
+    if (advise_len > 0) {
+#ifndef _WIN32
+        // POSIX_FADV_SEQUENTIAL doubles the default readahead window.
+        // POSIX_FADV_WILLNEED starts async readahead for the whole region.
+        // Both are advisory — failure is non-fatal.
+        (void)posix_fadvise(m_handle, static_cast<off_t>(advise_offset),
+                            static_cast<off_t>(advise_len), POSIX_FADV_SEQUENTIAL);
+        (void)posix_fadvise(m_handle, static_cast<off_t>(advise_offset),
+                            static_cast<off_t>(advise_len), POSIX_FADV_WILLNEED);
+#endif
+    }
 }
 
 ParallelReadStreamBuf::~ParallelReadStreamBuf() {
     close_file_handle(m_handle);
+}
+
+// Serve bytes from the read-ahead buffer.  Updates dst/n in-place.
+std::streamsize ParallelReadStreamBuf::serve_from_readahead(char_type*& dst, std::streamsize& n) {
+    const auto off = static_cast<size_t>(m_file_offset);
+    if (off < m_ra_buf_start || off >= m_ra_buf_end)
+        return 0;
+    const size_t buf_avail = m_ra_buf_end - off;
+    const size_t to_copy = (std::min)(buf_avail, static_cast<size_t>(n));
+    std::memcpy(dst, m_ra_buf.get() + (off - m_ra_buf_start), to_copy);
+    m_file_offset += static_cast<std::streamoff>(to_copy);
+    dst += to_copy;
+    n -= static_cast<std::streamsize>(to_copy);
+    return static_cast<std::streamsize>(to_copy);
+}
+
+// Refill the read-ahead buffer starting at m_file_offset.
+bool ParallelReadStreamBuf::refill_readahead() {
+    if (!m_ra_buf) {
+        m_ra_buf = std::make_unique<char_type[]>(default_parallel_io_readahead_size);
+    }
+    const size_t off = static_cast<size_t>(m_file_offset);
+    const size_t remaining = static_cast<size_t>(m_file_size - m_file_offset);
+    const size_t to_read = (std::min)(default_parallel_io_readahead_size, remaining);
+    if (to_read == 0)
+        return false;
+    if (!single_read(m_ra_buf.get(), to_read, off))
+        return false;
+    m_ra_buf_start = off;
+    m_ra_buf_end = off + to_read;
+    return true;
 }
 
 // xsgetn: main hot path - called by sgetn() for all bulk reads
@@ -45,14 +95,13 @@ std::streamsize ParallelReadStreamBuf::xsgetn(char_type* dst, std::streamsize n)
 
     std::streamsize total = 0;
 
-    // Drain any chars previously buffered by underflow()
+    // 1. Drain any chars in the streambuf get-area (set by underflow)
     if (gptr() != nullptr && gptr() < egptr()) {
         const std::streamsize avail = static_cast<std::streamsize>(egptr() - gptr());
         const std::streamsize from_buf = (std::min)(n, avail);
         std::memcpy(dst, gptr(), static_cast<size_t>(from_buf));
-        // Safe: from_buf <= UNDERFLOW_BUF (8192), always fits in int.
-        static_assert(UNDERFLOW_BUF <= static_cast<size_t>((std::numeric_limits<int>::max)()),
-                      "UNDERFLOW_BUF must fit in int for gbump()");
+        static_assert(default_parallel_io_readahead_size <= static_cast<size_t>((std::numeric_limits<int>::max)()),
+                      "default_parallel_io_readahead_size must fit in int for gbump()");
         gbump(static_cast<int>(from_buf));
         total += from_buf;
         dst += from_buf;
@@ -64,16 +113,32 @@ std::streamsize ParallelReadStreamBuf::xsgetn(char_type* dst, std::streamsize n)
     }
 
     const std::streamoff remaining = m_file_size - m_file_offset;
-    const std::streamsize to_read = static_cast<std::streamsize>((std::min)(static_cast<std::streamoff>(n), remaining));
+    n = static_cast<std::streamsize>((std::min)(static_cast<std::streamoff>(n), remaining));
 
-    const size_t bytes = static_cast<size_t>(to_read);
-    const size_t offset = static_cast<size_t>(m_file_offset);
+    // 2. Large reads: bypass the read-ahead buffer entirely
+    if (static_cast<size_t>(n) >= m_threshold) {
+        const size_t bytes = static_cast<size_t>(n);
+        const size_t offset = static_cast<size_t>(m_file_offset);
+        bool ok = parallel_read(dst, bytes, offset);
+        if (ok) {
+            m_file_offset += n;
+            total += n;
+        }
+        // Invalidate the read-ahead buffer since we jumped past it
+        m_ra_buf_start = m_ra_buf_end = 0;
+        return total;
+    }
 
-    bool ok = (bytes >= m_threshold) ? parallel_read(dst, bytes, offset) : single_read(dst, bytes, offset);
-
-    if (ok) {
-        m_file_offset += to_read;
-        total += to_read;
+    // 3. Small reads: serve from the read-ahead buffer, refilling as needed
+    while (n > 0 && m_file_offset < m_file_size) {
+        // Try the existing read-ahead window first
+        std::streamsize served = serve_from_readahead(dst, n);
+        total += served;
+        if (n <= 0)
+            break;
+        // Buffer miss — refill
+        if (!refill_readahead())
+            break;
     }
 
     return total;
@@ -84,22 +149,22 @@ ParallelReadStreamBuf::int_type ParallelReadStreamBuf::underflow() {
     if (m_file_offset >= m_file_size) {
         return traits_type::eof();
     }
-    if (!m_underflow_buf) {
-        m_underflow_buf = std::make_unique<char_type[]>(UNDERFLOW_BUF);
+    // Reuse the read-ahead buffer: if current offset falls within it,
+    // expose the remaining window as the get-area.  Otherwise refill.
+    const auto off = static_cast<size_t>(m_file_offset);
+    if (off < m_ra_buf_start || off >= m_ra_buf_end) {
+        if (!refill_readahead())
+            return traits_type::eof();
     }
-    // Read a batch of up to UNDERFLOW_BUF bytes so that character-by-character
-    // consumers (std::getline, operator>>) don't issue one pread per char.
-    const size_t to_read =
-        static_cast<size_t>((std::min)(static_cast<std::streamoff>(UNDERFLOW_BUF), m_file_size - m_file_offset));
-    if (!single_read(m_underflow_buf.get(), to_read, static_cast<size_t>(m_file_offset))) {
-        return traits_type::eof();
-    }
-    // Advance m_file_offset past the bytes we just read into the get area.
-    // m_file_offset now points to the byte after egptr(), consistent with
-    // the seekoff(0, cur) formula: logical_pos = m_file_offset - (egptr - gptr).
-    m_file_offset += static_cast<std::streamoff>(to_read);
-    setg(m_underflow_buf.get(), m_underflow_buf.get(), m_underflow_buf.get() + to_read);
-    return traits_type::to_int_type(m_underflow_buf[0]);
+    // Expose the portion from current offset to end of read-ahead buffer.
+    char_type* base = m_ra_buf.get();
+    const size_t buf_off = off - m_ra_buf_start;
+    const size_t buf_avail = m_ra_buf_end - off;
+    // Advance m_file_offset past the bytes we expose in the get area.
+    // seekoff(0, cur) formula: logical_pos = m_file_offset - (egptr - gptr).
+    m_file_offset += static_cast<std::streamoff>(buf_avail);
+    setg(base + buf_off, base + buf_off, base + buf_off + buf_avail);
+    return traits_type::to_int_type(*(base + buf_off));
 }
 
 ParallelReadStreamBuf::pos_type ParallelReadStreamBuf::seekoff(off_type off,
@@ -135,6 +200,7 @@ ParallelReadStreamBuf::pos_type ParallelReadStreamBuf::seekoff(off_type off,
     }
 
     setg(nullptr, nullptr, nullptr);  // invalidate get-area
+    m_ra_buf_start = m_ra_buf_end = 0;  // invalidate read-ahead buffer
     m_file_offset = new_pos;
     // Return the logical position (0 == start of exposed stream).
     return pos_type(m_file_offset - m_header_offset);
@@ -173,8 +239,8 @@ bool ParallelReadStreamBuf::single_read(char* dst, size_t size, size_t file_offs
 // Parallel positional read
 bool ParallelReadStreamBuf::parallel_read(char* dst, size_t size, size_t file_offset) {
     const size_t hw_threads = (std::max)(size_t{1}, static_cast<size_t>(std::thread::hardware_concurrency()));
-    const size_t max_by_size = size / (1024 * 1024);  // 1 thread per MB
-    const size_t num_threads = (std::max)(size_t{1}, (std::min)(hw_threads, max_by_size));
+    const size_t max_by_chunk = size / default_parallel_io_min_chunk;
+    const size_t num_threads = (std::max)(size_t{1}, (std::min)(hw_threads, max_by_chunk));
 
     if (num_threads == 1) {
         return single_read(dst, size, file_offset);
@@ -193,9 +259,9 @@ bool ParallelReadStreamBuf::parallel_read(char* dst, size_t size, size_t file_of
     chunk_size = (chunk_size + 4095u) & ~size_t{4095u};
 
     std::atomic<bool> success{true};
-    // Each worker opens its own file descriptor so that Linux's per-file-
+    // Each worker opens its own file descriptor so that the kernel's per-file-
     // description readahead state (file_ra_state / f_ra) is independent per
-    // thread. Sharing a single fd causes concurrent pread() calls to corrupt
+    // thread.  Sharing a single fd causes concurrent pread() calls to corrupt
     // each other's sequential readahead prediction, collapsing throughput from
     // ~3.5 GB/s sequential to ~0.5 GB/s.
     std::vector<std::thread> workers;
@@ -203,29 +269,32 @@ bool ParallelReadStreamBuf::parallel_read(char* dst, size_t size, size_t file_of
     for (size_t ithr = 0; ithr < num_threads; ++ithr) {
         try {
             workers.emplace_back([&, ithr]() {
-                const size_t cur_offset = ithr * chunk_size;
-                if (cur_offset >= size) {
-                    return;  // page-alignment rounding created a surplus worker slot
-                }
-                // Last thread: read everything remaining (includes the fragment that
-                // falls between (num_threads-1)*chunk_size and size).
-                // Non-last threads: cap to min(chunk_size, size - cur_offset) so we
-                // never read past eof when alignment pushed the chunk boundary beyond it.
-                const size_t read_size =
-                    (ithr == num_threads - 1) ? (size - cur_offset) : (std::min)(chunk_size, size - cur_offset);
-                char* const ptr = dst + cur_offset;
-                const size_t thread_file_offset = file_offset + cur_offset;
+                // Wrap the entire thread body in a try-catch so that
+                // any unexpected exception (e.g. std::bad_alloc from the OS path,
+                // or a future code change) sets the error flag instead of calling
+                // std::terminate() and killing the process.
+                try {
+                    const size_t cur_offset = ithr * chunk_size;
+                    if (cur_offset >= size) {
+                        return;  // page-alignment rounding created a surplus worker slot
+                    }
+                    const size_t read_size =
+                        (ithr == num_threads - 1) ? (size - cur_offset) : (std::min)(chunk_size, size - cur_offset);
+                    char* const ptr = dst + cur_offset;
+                    const size_t thread_file_offset = file_offset + cur_offset;
 
-                FileHandle t_handle = open_file_for_read(m_path);
-                if (t_handle == INVALID_HANDLE_VALUE) {
+                    FileHandle t_handle = open_file_for_read(m_path);
+                    if (t_handle == INVALID_HANDLE_VALUE) {
+                        success = false;
+                        return;
+                    }
+                    if (!positional_read(t_handle, ptr, read_size, thread_file_offset)) {
+                        success = false;
+                    }
+                    close_file_handle(t_handle);
+                } catch (...) {
                     success = false;
-                    return;
                 }
-
-                if (!positional_read(t_handle, ptr, read_size, thread_file_offset)) {
-                    success = false;
-                }
-                close_file_handle(t_handle);
             });  // workers.emplace_back
         } catch (...) {
             success = false;

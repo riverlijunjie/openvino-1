@@ -22,6 +22,9 @@ inline constexpr FileHandle INVALID_HANDLE_VALUE = -1;
 
 inline constexpr size_t default_parallel_io_threshold = 4UL * 1024 * 1024;  ///< 4 MB default threshold for parallel I/O
 inline constexpr size_t default_parallel_io_min_chunk = 2UL * 1024 * 1024;  ///< 2 MB minimum chunk size per thread
+// 8 MB read-ahead buffer — amortises thousands of small pread syscalls
+// into ~S/8MB bulk reads.  Large reads (>= threshold) bypass this buffer.
+inline constexpr size_t default_parallel_io_readahead_size = 8UL * 1024 * 1024;
 
 /**
  * @brief Open a file for reading and retrieve its size.

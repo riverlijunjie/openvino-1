@@ -259,7 +259,6 @@ void SingleFileStorage::read_cache_entry(const std::string& blob_id, bool enable
                                                                    blob_pos)};
             reader(compiled_blob);
         } else {
-            // Use parallel file I/O to saturate NVMe bandwidth instead of single-threaded ifstream.
             ov::util::ParallelReadStreamBuf par_buf(m_file_path, static_cast<std::streamoff>(blob_pos));
             std::istream stream(&par_buf);
             CompiledBlobVariant compiled_blob{std::in_place_index<1>, std::ref(stream)};
