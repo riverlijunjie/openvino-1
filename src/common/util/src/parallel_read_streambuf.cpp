@@ -264,6 +264,14 @@ bool ParallelReadStreamBuf::parallel_read(char* dst, size_t size, size_t file_of
     // thread.  Sharing a single fd causes concurrent pread() calls to corrupt
     // each other's sequential readahead prediction, collapsing throughput from
     // ~3.5 GB/s sequential to ~0.5 GB/s.
+    // RAII guard so that file handles are closed even if an exception escapes.
+    struct HandleGuard {
+        FileHandle h = INVALID_HANDLE_VALUE;
+        ~HandleGuard() {
+            close_file_handle(h);
+        }
+    };
+
     std::vector<std::thread> workers;
     workers.reserve(num_threads);
     for (size_t ithr = 0; ithr < num_threads; ++ithr) {
@@ -274,6 +282,10 @@ bool ParallelReadStreamBuf::parallel_read(char* dst, size_t size, size_t file_of
                 // or a future code change) sets the error flag instead of calling
                 // std::terminate() and killing the process.
                 try {
+                    // Early exit: skip work if another thread already failed.
+                    if (!success.load(std::memory_order_relaxed))
+                        return;
+
                     const size_t cur_offset = ithr * chunk_size;
                     if (cur_offset >= size) {
                         return;  // page-alignment rounding created a surplus worker slot
@@ -283,21 +295,21 @@ bool ParallelReadStreamBuf::parallel_read(char* dst, size_t size, size_t file_of
                     char* const ptr = dst + cur_offset;
                     const size_t thread_file_offset = file_offset + cur_offset;
 
-                    FileHandle t_handle = open_file_for_read(m_path);
-                    if (t_handle == INVALID_HANDLE_VALUE) {
-                        success = false;
+                    HandleGuard guard;
+                    guard.h = open_file_for_read(m_path);
+                    if (guard.h == INVALID_HANDLE_VALUE) {
+                        success.store(false, std::memory_order_relaxed);
                         return;
                     }
-                    if (!positional_read(t_handle, ptr, read_size, thread_file_offset)) {
-                        success = false;
+                    if (!positional_read(guard.h, ptr, read_size, thread_file_offset)) {
+                        success.store(false, std::memory_order_relaxed);
                     }
-                    close_file_handle(t_handle);
                 } catch (...) {
-                    success = false;
+                    success.store(false, std::memory_order_relaxed);
                 }
             });  // workers.emplace_back
         } catch (...) {
-            success = false;
+            success.store(false, std::memory_order_relaxed);
             break;
         }
     }
