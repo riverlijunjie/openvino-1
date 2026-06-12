@@ -48,6 +48,7 @@
 #include <map>
 #include <functional>
 #include <fstream>
+#include <atomic>
 
 #include "debug_helper.hpp"
 #ifdef GPU_DEBUG_CONFIG
@@ -59,6 +60,19 @@
 #endif
 
 namespace cldnn {
+
+#if OV_GPU_MULTI_IMPL_SWITCHING_DEBUG
+// DEBUG CODE: FC impl execution counters (extern declaration, defined in primitive_inst.cpp)
+namespace fc_counters {
+extern std::atomic<uint64_t> fc_onednn_count;
+extern std::atomic<uint64_t> fc_ocl_count;
+extern std::atomic<uint64_t> fc_other_count;
+extern std::atomic<uint64_t> fc_switch_count;
+extern void reset();
+extern void print_summary(const char* tag);
+}  // namespace fc_counters
+#endif  // OV_GPU_MULTI_IMPL_SWITCHING_DEBUG
+
 namespace {
 
 #ifdef GPU_DEBUG_CONFIG
@@ -485,7 +499,7 @@ network::output_chains_map::iterator network::add_output_chain(std::shared_ptr<p
     std::stack<const primitive_inst*> candidates;
     auto& eng = get_engine();
 
-    const auto& mem_orig = p_inst->output_memory();
+    const auto& mem_orig = p_inst->output_memory_ptr();
 
     auto add_mdata_chain = [&](primitive_inst* p_inst) {
         auto mdata_ptr = dynamic_cast<mutable_data_inst*>(p_inst);
@@ -495,12 +509,12 @@ network::output_chains_map::iterator network::add_output_chain(std::shared_ptr<p
         // its attached memory with both its inputs and outputs
         for (auto& dep : p_inst->dependencies()) {
             // check dependencies
-            if (dep.first->outputs_allocated() && eng.is_the_same_buffer(mem_orig, dep.first->output_memory())) {
+            if (dep.first->outputs_allocated() && mem_orig && eng.is_the_same_buffer(*mem_orig, dep.first->output_memory())) {
                 chain.push_back(const_cast<primitive_inst*>(dep.first));
             }
             // then second order dependencies
             for (auto& second_dep : dep.first->dependencies()) {
-                if (second_dep.first->outputs_allocated() && eng.is_the_same_buffer(mem_orig, second_dep.first->output_memory())) {
+                if (second_dep.first->outputs_allocated() && mem_orig && eng.is_the_same_buffer(*mem_orig, second_dep.first->output_memory())) {
                     chain.push_back(const_cast<primitive_inst*>(second_dep.first));
                 }
             }
@@ -510,7 +524,7 @@ network::output_chains_map::iterator network::add_output_chain(std::shared_ptr<p
         const auto& user_ids = mdata_ptr->get_user_ids();
         for (const auto& id : user_ids) {
             auto usr_prim = get_primitive(id).get();
-            if (usr_prim->outputs_allocated() && eng.is_the_same_buffer(mem_orig, usr_prim->output_memory())) {
+            if (usr_prim->outputs_allocated() && mem_orig && eng.is_the_same_buffer(*mem_orig, usr_prim->output_memory())) {
                 chain.push_back(usr_prim);
             }
         }
@@ -529,7 +543,7 @@ network::output_chains_map::iterator network::add_output_chain(std::shared_ptr<p
         candidates.pop();
         // Add cand inst to the chain when cand's output is not allocated yet.
         if (!p_inst->outputs_allocated()
-            || (cand->outputs_allocated() && eng.is_the_same_buffer(mem_orig, cand->output_memory()))) {
+            || (cand->outputs_allocated() && eng.is_the_same_buffer(*mem_orig, cand->output_memory()))) {
             auto nc_cand = const_cast<primitive_inst*>(cand);
             chain.push_back(nc_cand);
             add_mdata_chain(nc_cand);
@@ -543,7 +557,7 @@ network::output_chains_map::iterator network::add_output_chain(std::shared_ptr<p
                     const auto& mem_dep = dep.first->output_memory();
                     // Add dep inst to the chain when dep's output is not allocated yet.
                     if (!p_inst->outputs_allocated()
-                        || eng.is_the_same_buffer(mem_orig, mem_dep)) {
+                        || eng.is_the_same_buffer(*mem_orig, mem_dep)) {
                         auto nc_dep = const_cast<primitive_inst*>(dep.first);
                         chain.push_back(nc_dep);
                         add_mdata_chain(nc_dep);
@@ -958,6 +972,22 @@ void network::execute_impl(const std::vector<event::ptr>& events) {
     // provide proper event to execution. Flushing pipeline should prevent this kind of issues.
     // In scenarios with a big number of very small networks it can provide performance drop.
     get_stream().flush();
+
+#if OV_GPU_MULTI_IMPL_SWITCHING_DEBUG
+    //  DEBUG CODE: FC counter for print and reset after each network execution
+    {
+        const uint64_t fc_total = fc_counters::fc_onednn_count.load() +
+                                  fc_counters::fc_ocl_count.load() +
+                                  fc_counters::fc_other_count.load();
+        if (fc_total > 0) {
+            static uint64_t infer_seq = 0;
+            char tag[64];
+            snprintf(tag, sizeof(tag), "infer#%lu", static_cast<unsigned long>(++infer_seq));
+            fc_counters::print_summary(tag);
+            fc_counters::reset();
+        }
+    }
+#endif  // OV_GPU_MULTI_IMPL_SWITCHING_DEBUG
 
     // Reset all flags for the next execution
     for (auto& inst : _exec_order) {

@@ -23,7 +23,7 @@
 #include "transformations/fp16_compression/mark_decompression_convert_constant_folding.hpp"
 #include "transformations/fp16_compression/mark_subgraphs_to_keep_in_mixed_precision.hpp"
 #include "transformations/rt_info/decompression.hpp"
-#include "transformations/rt_info/disable_fp16_compression.hpp"
+#include "transformations/rt_info/disable_precision_conversion.hpp"
 #include "transformations/rt_info/keep_const_precision.hpp"
 #include "transformations/rt_info/original_precision_attribute.hpp"
 #include "transformations/utils/utils.hpp"
@@ -1322,6 +1322,11 @@ bool fuse_type_to_constant(const std::shared_ptr<ov::Node>& node,
                            const std::vector<Input<Node>>& consumers) {
     // Consts marked with is_keep_const_precision should be kept in their own precision until they reach the plugin
     if (is_keep_const_precision(node))
+        return false;
+
+    // GGUF block constants are opaque blocks of bytes: their element type and byte content must be
+    // preserved exactly. Never convert their precision (see SPEC.md §5.2).
+    if (node->get_element_type().is_gguf_block())
         return false;
 
     auto from = node->get_element_type();

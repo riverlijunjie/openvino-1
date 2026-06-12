@@ -242,6 +242,14 @@ MarkDequantization::MarkDequantization(const element::TypeVector& precisions,
             return false;
         }
 
+        // GGUF block constants are opaque and must never be treated as a dequantization input. A
+        // Convert over a GGUF type is already rejected upstream; guard here defensively so that no
+        // dequantization marking is applied to a GGUF-fed subgraph (see SPEC.md §5.2).
+        if (input.get_element_type().is_gguf_block()) {
+            ov::disable_constant_folding(input.get_node_shared_ptr());
+            return false;
+        }
+
         // Multiply and Subtract have to be marked as dq
         set_rt_info(pt_map, mark_as_dequantization_node, {subtract_pattern, multiply_pattern}, {/* not applicable */});
 
@@ -378,7 +386,7 @@ KeepDequantizationPrecision::KeepDequantizationPrecision(const element::TypeVect
         for (const auto& node_to_mark : nodes_to_mark) {
             if (pt_map.count(node_to_mark)) {
                 auto node_ptr = pt_map.at(node_to_mark).get_node_shared_ptr();
-                disable_fp16_compression(node_ptr);
+                ov::disable_conversion(node_ptr, element::f16);
             }
         }
 
