@@ -30,6 +30,8 @@ struct SparseSDPARuntimeParams : public ImplRuntimeParams {
     size_t history_len = 0;  ///< S
     size_t k_seq_pitch = 0;  ///< allocated S of KEY (S + dynamic upper pad, e.g. from KVCache)
     size_t v_seq_pitch = 0;  ///< allocated S of VALUE
+    size_t k_param_pitch = 0;  ///< allocated S of the key scale / zero point (compressed K/V only)
+    size_t v_param_pitch = 0;  ///< allocated S of the value scale / zero point (compressed K/V only)
     size_t tile_count = 0;
     bool is_decode = false;  ///< L == 1
 };

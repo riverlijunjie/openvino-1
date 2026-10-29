@@ -4,10 +4,13 @@
 
 // Q0 - SparsePA main K/V cache write.
 //
-// Byte-for-byte the proven qsa_kv_cache_update.cm address arithmetic; only macro names
+// f16 caches: byte-for-byte the proven qsa_kv_cache_update.cm address arithmetic; only macro names
 // are local to the split ops (QSA_PAGE_SIZE instead of QSA_PA_BLOCK_SIZE).
+// Quantized caches (QSA_K_MODE / QSA_V_MODE != 0): one work-item quantizes one token row of one head
+// (see qsa_kv_quant.hpp); BY_CHANNEL keys are written by sparse_attention_kv_write_kchannel.cm instead.
 //
-// JIT constants: QSA_KV_HEADS, QSA_K_HEAD_SIZE, QSA_V_HEAD_SIZE, QSA_PAGE_SIZE
+// JIT constants: QSA_KV_HEADS, QSA_K_HEAD_SIZE, QSA_V_HEAD_SIZE, QSA_PAGE_SIZE, QSA_KCACHE_T, QSA_VCACHE_T,
+// QSA_{K,V}_{MODE,BITS,SYM,GROUP,ROW_BYTES,PAGE_BYTES,PARAM_OFFSET}
 //
 // Dispatch: gws = [1, QSA_KV_HEADS, wg_count * wg_size], lws = [1, 1, wg_size]
 
@@ -15,6 +18,7 @@
 #define ATTR [[type("svmptr_t")]]
 #endif
 
+#include "qsa_kv_quant.hpp"
 #include "qsa_ops_common.hpp"
 
 template <int HEAD_SIZE>
@@ -24,14 +28,27 @@ CM_INLINE void sparse_attention_copy_head(const half* src ATTR, half* cache ATTR
     qsa_gr::store_hv<HEAD_SIZE>(cache, dst_elem, v);
 }
 
+// Quantizes one head row of `src` into token `token_in_page` of the page at byte offset `page_base` and stores its parameters.
+template <int HEAD_SIZE, int BITS, int SYM, int PARAM_OFFSET, int ROW_BYTES>
+CM_INLINE void sparse_attention_quantize_head(const half* src ATTR, uint8_t* cache ATTR, uint src_elem, uint page_base, uint token_in_page) {
+    vector<half, HEAD_SIZE> row;
+    qsa_gr::load_hv<HEAD_SIZE>(row, src, src_elem);
+    vector<uint8_t, HEAD_SIZE * BITS / 8> packed;
+    half scale_h, zp_h;
+    qsa_kvq::quantize_row<HEAD_SIZE, BITS, SYM>(row, packed, scale_h, zp_h);
+    qsa_kvq::store_bytes<HEAD_SIZE * BITS / 8>(cache, page_base + token_in_page * ROW_BYTES, packed);
+    vector<uint32_t, 1> params = qsa_kvq::pack_token_params(scale_h, zp_h);
+    cm_ptr_store<uint32_t, 1>((uint32_t*)cache, page_base + PARAM_OFFSET + token_in_page * 4, params);
+}
+
 extern "C" _GENX_MAIN_ void KERNEL_NAME(const half* key ATTR,                      // [num_tokens, Hkv*Dh] token-major
                                         const half* value ATTR,                    // [num_tokens, Hkv*Dv] token-major
                                         const int32_t* past_lens ATTR,             // [num_seqs]
                                         const int32_t* block_indices ATTR,         // [used_blocks]
                                         const int32_t* block_indices_begins ATTR,  // [num_seqs+1]
                                         const int32_t* subsequence_begins ATTR,    // [num_seqs+1]
-                                        half* key_cache ATTR,                      // [num_blocks, Hkv, page_size, Dh]
-                                        half* value_cache ATTR,                    // [num_blocks, Hkv, page_size, Dv]
+                                        QSA_KCACHE_T* key_cache ATTR,              // [num_blocks, Hkv, page_size (+ parameter rows), row]
+                                        QSA_VCACHE_T* value_cache ATTR,            // [num_blocks, Hkv, page_size (+ parameter rows), row]
                                         uint32_t key_pitch,
                                         uint32_t key_offset,
                                         uint32_t value_pitch,
@@ -70,6 +87,17 @@ extern "C" _GENX_MAIN_ void KERNEL_NAME(const half* key ATTR,                   
     const uint k_src = key_offset + token_idx * key_pitch + head_idx * K_HEAD;
     const uint v_src = value_offset + token_idx * value_pitch + head_idx * V_HEAD;
 
+#if QSA_K_MODE == 0
     sparse_attention_copy_head<K_HEAD>(key, key_cache, k_src, qsa::kv_cache_offset(physical_page, head_idx, token_in_page, KV_HEADS, PAGE, K_HEAD));
+#elif QSA_K_MODE == 1
+    sparse_attention_quantize_head<K_HEAD, QSA_K_BITS, QSA_K_SYM, QSA_K_PARAM_OFFSET, QSA_K_ROW_BYTES>(
+        key, key_cache, k_src, qsa_kvq::page_base(physical_page, head_idx, KV_HEADS, QSA_K_PAGE_BYTES), token_in_page);
+#endif
+
+#if QSA_V_MODE == 0
     sparse_attention_copy_head<V_HEAD>(value, value_cache, v_src, qsa::kv_cache_offset(physical_page, head_idx, token_in_page, KV_HEADS, PAGE, V_HEAD));
+#else
+    sparse_attention_quantize_head<V_HEAD, QSA_V_BITS, QSA_V_SYM, QSA_V_PARAM_OFFSET, QSA_V_ROW_BYTES>(
+        value, value_cache, v_src, qsa_kvq::page_base(physical_page, head_idx, KV_HEADS, QSA_V_PAGE_BYTES), token_in_page);
+#endif
 }

@@ -29,6 +29,7 @@
 #define ATTR [[type("svmptr_t")]]
 #endif
 #include "qsa_dpas_common.hpp"
+#include "qsa_kv_quant.hpp"
 #include "qsa_ops_common.hpp"
 
 #define GQA_W 4
@@ -103,8 +104,8 @@ CM_INLINE void gqa_paged_reduce_st16(matrix_ref<float, 16, 16> st, uint slm, uin
 
 extern "C" _GENX_MAIN_ void KERNEL_NAME(
     const half* query ATTR,                     // [num_tokens, Hq*Dh]
-    const half* key_cache ATTR,                 // [num_blocks, Hkv, PAGE, Dh]
-    const half* value_cache ATTR,               // [num_blocks, Hkv, PAGE, Dv]
+    const QSA_KCACHE_T* key_cache ATTR,         // [num_blocks, Hkv, PAGE (+ parameter rows), Dh or row bytes]
+    const QSA_VCACHE_T* value_cache ATTR,       // [num_blocks, Hkv, PAGE (+ parameter rows), Dv or row bytes]
     const int32_t* past_lens ATTR,               // [num_seqs]
     const int32_t* subsequence_begins ATTR,      // [num_seqs+1]
     const int32_t* block_indices ATTR,           // [used_blocks]
@@ -218,7 +219,8 @@ extern "C" _GENX_MAIN_ void KERNEL_NAME(
 
         matrix<half, 16, GQA_DH> kwide;
         matrix<half, 8, GQA_DV * 2> vwide;
-        // Coalesce only a full, contiguous, page-local 16-row step.
+        // Coalesce only a full, contiguous, page-local 16-row step (f16 caches; quantized pages load block by block).
+#if QSA_K_MODE == 0 && QSA_V_MODE == 0
         bool contiguous = valid_kv == 16 && positions[0] % PAGE + 16 <= PAGE;
 #pragma unroll
         for (uint j = 1; j < GQA_BLOCKS; j++)
@@ -245,6 +247,9 @@ extern "C" _GENX_MAIN_ void KERNEL_NAME(
                 vwide.select<8, 1, 64, 1>(0, c * 64) = tmp;
             }
         } else {
+#else
+        {
+#endif
 #pragma unroll
             for (uint j = 0; j < GQA_BLOCKS; j++) {
                 if (rows[j] != 0) {
@@ -254,20 +259,43 @@ extern "C" _GENX_MAIN_ void KERNEL_NAME(
 #else
                     const uint page = (uint)block_indices[page_begin + pos / PAGE];
 #endif
+#if QSA_K_MODE == 0
                     const half* kb = key_cache + qsa::kv_cache_offset(page, kv_head, pos % PAGE, HKV, PAGE, DH);
-                    const half* vb = value_cache + qsa::kv_cache_offset(page, kv_head, pos % PAGE, HKV, PAGE, DV);
 #pragma unroll
                     for (uint c = 0; c < GQA_DH / 32; c++) {
                         matrix<half, R, 32> tmp;
                         qsa_dpas::load_a_wide<R, 32>(tmp, kb, rows[j], DH * 2, DH * 2, worker * GQA_DH + c * 32);
                         kwide.select<R, 1, 32, 1>(j * R, c * 32) = tmp;
                     }
+#else
+                    {
+                        matrix<half, R, GQA_DH> tmp;
+                        qsa_kvq::load_tile<R, GQA_DH, QSA_K_BITS, QSA_K_SYM, QSA_K_ROW_BYTES, QSA_K_PARAM_OFFSET, QSA_K_MODE, QSA_K_GROUP, DH>(
+                            tmp, key_cache, qsa_kvq::page_base(page, kv_head, HKV, QSA_K_PAGE_BYTES), pos % PAGE, rows[j], worker * GQA_DH);
+                        kwide.select<R, 1, GQA_DH, 1>(j * R, 0) = tmp;
+                    }
+#endif
+#if QSA_V_MODE == 0
+                    const half* vb = value_cache + qsa::kv_cache_offset(page, kv_head, pos % PAGE, HKV, PAGE, DV);
 #pragma unroll
                     for (uint c = 0; c < GQA_DV / 32; c++) {
                         matrix<half, R / 2, 64> tmp;
                         qsa_dpas::load_vnni_wide<R, 32>(tmp, vb, rows[j], DV * 2, DV * 2, worker * GQA_DV + c * 32);
                         vwide.select<R / 2, 1, 64, 1>(j * R / 2, c * 64) = tmp;
                     }
+#else
+                    {
+                        matrix<half, R, GQA_DV> tmp;
+                        qsa_kvq::load_tile<R, GQA_DV, QSA_V_BITS, QSA_V_SYM, QSA_V_ROW_BYTES, QSA_V_PARAM_OFFSET, 1, 1, DV>(
+                            tmp, value_cache, qsa_kvq::page_base(page, kv_head, HKV, QSA_V_PAGE_BYTES), pos % PAGE, rows[j], worker * GQA_DV);
+                        // VNNI: rows 2i / 2i+1 interleaved per channel.
+#pragma unroll
+                        for (uint c = 0; c < GQA_DV / 32; c++) {
+                            vwide.select<R / 2, 1, 32, 2>(j * R / 2, c * 64) = tmp.select<R / 2, 2, 32, 1>(0, c * 32);
+                            vwide.select<R / 2, 1, 32, 2>(j * R / 2, c * 64 + 1) = tmp.select<R / 2, 2, 32, 1>(1, c * 32);
+                        }
+                    }
+#endif
                 } else {
                     kwide.select<R, 1, GQA_DH, 1>(j * R, 0) = (half)0.0f;
                     vwide.select<R / 2, 1, GQA_DV * 2, 1>(j * R / 2, 0) = (half)0.0f;

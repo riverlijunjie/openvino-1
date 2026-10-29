@@ -20,6 +20,7 @@
 #define ATTR [[type("svmptr_t")]]
 #endif
 
+#include "qsa_kv_quant.hpp"
 #include "qsa_ops_common.hpp"
 
 #define QSA_SPLIT_LOG2E 1.4426950408889634f
@@ -38,15 +39,43 @@ CM_INLINE void sparse_attention_softmax_step(float score, float& running_max, fl
 
 template <int DH, int DV, int HKV, int PAGE, int SPAN>
 CM_INLINE void sparse_attention_attend_span_paged(vector_ref<float, DH> q, vector_ref<float, DV> acc, float& running_max, float& running_sum,
-                                           const half* key_cache ATTR, const half* value_cache ATTR, const int32_t* block_indices ATTR, uint page_begin,
-                                           uint kv_head, uint pos0) {
+                                           const QSA_KCACHE_T* key_cache ATTR, const QSA_VCACHE_T* value_cache ATTR, const int32_t* block_indices ATTR,
+                                           uint page_begin, uint kv_head, uint pos0) {
     const uint page = (uint)block_indices[page_begin + pos0 / (uint)PAGE];
     const uint tok0 = pos0 % (uint)PAGE;
 
     vector<half, SPAN * DH> ktile;
+#if QSA_K_MODE == 0
     qsa_gr::load_hv<SPAN * DH>(ktile, key_cache, qsa::kv_cache_offset(page, kv_head, tok0, HKV, PAGE, DH));
+#else
+    {
+        const uint kpb = qsa_kvq::page_base(page, kv_head, HKV, QSA_K_PAGE_BYTES);
+#pragma unroll
+        for (int s = 0; s < SPAN; s++) {
+            vector<half, DH> row;
+#if QSA_K_MODE == 1
+            qsa_kvq::load_row_token<DH, QSA_K_BITS, QSA_K_SYM, QSA_K_ROW_BYTES, QSA_K_PARAM_OFFSET>(row, key_cache, kpb, tok0 + s);
+#else
+            qsa_kvq::load_row_channel<DH, QSA_K_BITS, QSA_K_SYM, QSA_K_ROW_BYTES, QSA_K_PARAM_OFFSET, QSA_K_GROUP>(row, key_cache, kpb, tok0 + s);
+#endif
+            ktile.template select<DH, 1>(s * DH) = row;
+        }
+    }
+#endif
     vector<half, SPAN * DV> vtile;
+#if QSA_V_MODE == 0
     qsa_gr::load_hv<SPAN * DV>(vtile, value_cache, qsa::kv_cache_offset(page, kv_head, tok0, HKV, PAGE, DV));
+#else
+    {
+        const uint vpb = qsa_kvq::page_base(page, kv_head, HKV, QSA_V_PAGE_BYTES);
+#pragma unroll
+        for (int s = 0; s < SPAN; s++) {
+            vector<half, DV> row;
+            qsa_kvq::load_row_token<DV, QSA_V_BITS, QSA_V_SYM, QSA_V_ROW_BYTES, QSA_V_PARAM_OFFSET>(row, value_cache, vpb, tok0 + s);
+            vtile.template select<DV, 1>(s * DV) = row;
+        }
+    }
+#endif
 
 #pragma unroll
     for (int s = 0; s < SPAN; s++) {
@@ -70,8 +99,8 @@ CM_INLINE void sparse_attention_attend_span_paged(vector_ref<float, DH> q, vecto
 }
 
 extern "C" _GENX_MAIN_ void KERNEL_NAME(const half* query ATTR,                     // [num_tokens, Hq*Dh]
-                                        const half* key_cache ATTR,                // [num_blocks, Hkv, page_size, Dh]
-                                        const half* value_cache ATTR,              // [num_blocks, Hkv, page_size, Dv]
+                                        const QSA_KCACHE_T* key_cache ATTR,        // [num_blocks, Hkv, page_size (+ parameter rows), row]
+                                        const QSA_VCACHE_T* value_cache ATTR,      // [num_blocks, Hkv, page_size (+ parameter rows), row]
                                         const int32_t* past_lens ATTR,             // [num_seqs]
                                         const int32_t* subsequence_begins ATTR,    // [num_seqs+1]
                                         const int32_t* block_indices ATTR,         // [used_blocks]

@@ -21,6 +21,7 @@
 #define ATTR [[type("svmptr_t")]]
 #endif
 
+#include "qsa_kv_quant.hpp"
 #include "qsa_ops_common.hpp"
 
 #define QSA_SPLIT_DENSE_LOG2E 1.4426950408889634f
@@ -39,15 +40,33 @@ CM_INLINE void sparse_attention_dense_softmax_step(float score, float& running_m
 
 template <int DH, int DV, int HKV, int SPAN>
 CM_INLINE void sparse_attention_attend_span_dense(vector_ref<float, DH> q, vector_ref<float, DV> acc, float& running_max, float& running_sum,
-                                           const half* key ATTR, const half* value ATTR, uint batch, uint kv_head, uint k_pitch, uint v_pitch,
-                                           uint pos0) {
+                                           const QSA_KV_DATA_T* key ATTR, const QSA_KV_DATA_T* value ATTR, uint batch, uint kv_head, uint k_pitch, uint v_pitch,
+                                           uint pos0
+#if QSA_DENSE_QUANT
+                                           ,
+                                           const half* key_scale ATTR, const half* value_scale ATTR, const int8_t* key_zp ATTR, const int8_t* value_zp ATTR,
+                                           uint shift, uint k_ppitch, uint v_ppitch
+#endif
+) {
+    vector<half, SPAN * DH> ktile;
+    vector<half, SPAN * DV> vtile;
+#if QSA_DENSE_QUANT
+    // `shift` = left padding of the row; the data pointers are not pre-shifted in this mode.
+#pragma unroll
+    for (int s = 0; s < SPAN; s++) {
+        vector<half, DH> krow;
+        qsa_kvq::load_row_dense<DH>(krow, key, key_scale, key_zp, (batch * HKV + kv_head) * k_pitch + shift + pos0 + s, (batch * HKV + kv_head) * k_ppitch + shift + pos0 + s);
+        ktile.template select<DH, 1>(s * DH) = krow;
+        vector<half, DV> vrow;
+        qsa_kvq::load_row_dense<DV>(vrow, value, value_scale, value_zp, (batch * HKV + kv_head) * v_pitch + shift + pos0 + s, (batch * HKV + kv_head) * v_ppitch + shift + pos0 + s);
+        vtile.template select<DV, 1>(s * DV) = vrow;
+    }
+#else
     const uint base_k = qsa_ops::kv_offset_dense(batch, kv_head, pos0, HKV, k_pitch, DH);
     const uint base_v = qsa_ops::kv_offset_dense(batch, kv_head, pos0, HKV, v_pitch, DV);
-
-    vector<half, SPAN * DH> ktile;
     qsa_gr::load_hv<SPAN * DH>(ktile, key, base_k);
-    vector<half, SPAN * DV> vtile;
     qsa_gr::load_hv<SPAN * DV>(vtile, value, base_v);
+#endif
 
 #pragma unroll
     for (int s = 0; s < SPAN; s++) {
@@ -71,17 +90,29 @@ CM_INLINE void sparse_attention_attend_span_dense(vector_ref<float, DH> q, vecto
 }
 
 extern "C" _GENX_MAIN_ void KERNEL_NAME(const half* query ATTR,               // [B, Hq, L, Dh]
-                                        const half* key ATTR,                 // [B, Hkv, S, Dh], dense history
-                                        const half* value ATTR,               // [B, Hkv, S, Dv], dense history
+                                        const QSA_KV_DATA_T* key ATTR,        // [B, Hkv, S, Dh], dense history (i8 when compressed)
+                                        const QSA_KV_DATA_T* value ATTR,      // [B, Hkv, S, Dv], dense history (i8 when compressed)
                                         const int32_t* selected_blocks ATTR,  // [B*L, block_topk]
                                         const int32_t* selected_counts ATTR,  // [B*L]
                                         const int32_t* key_length ATTR,       // [B]
+#if QSA_DENSE_QUANT
+                                        const half* key_scale ATTR,           // [B, Hkv, S, 1]
+                                        const half* value_scale ATTR,         // [B, Hkv, S, 1]
+                                        const int8_t* key_zp ATTR,            // [B, Hkv, S, 1]
+                                        const int8_t* value_zp ATTR,          // [B, Hkv, S, 1]
+#endif
                                         half* output ATTR,                    // [B, Hq, L, Dv]
                                         uint32_t seq_len,                     // L
                                         uint32_t history_len,                 // S
                                         uint32_t num_rows,                    // B*L
                                         uint32_t k_seq_pitch,                 // padded S of key
-                                        uint32_t v_seq_pitch) {               // padded S of value
+                                        uint32_t v_seq_pitch                  // padded S of value
+#if QSA_DENSE_QUANT
+                                        ,
+                                        uint32_t k_param_pitch,               // padded S of key scale / zero point
+                                        uint32_t v_param_pitch                // padded S of value scale / zero point
+#endif
+                                        ) {
     constexpr uint HQ = QSA_HEADS;
     constexpr uint HKV = QSA_KV_HEADS;
     constexpr uint DH = QSA_K_HEAD_SIZE;
@@ -102,8 +133,11 @@ extern "C" _GENX_MAIN_ void KERNEL_NAME(const half* query ATTR,               //
     uint kl = (uint)key_length[batch];
     kl = kl < history_len ? kl : history_len;
     // Left-padded K/V: logical key j of this row is stored at row (history_len - kl) + j.
-    key += (history_len - kl) * DH;
-    value += (history_len - kl) * DV;
+    const uint shift = history_len - kl;
+#if !QSA_DENSE_QUANT
+    key += shift * DH;
+    value += shift * DV;
+#endif
     const bool pad_row = kl + l < seq_len;
     const uint q_abs = kl + l - seq_len;  // RST q_abs = key_length - L + l, valid unless pad_row
 
@@ -126,13 +160,23 @@ extern "C" _GENX_MAIN_ void KERNEL_NAME(const half* query ATTR,               //
             continue;
         }
         sparse_attention_attend_span_dense<DH, DV, HKV, R>(q, acc, running_max, running_sum, key, value, batch, kv_head, k_seq_pitch, v_seq_pitch,
-                                                           (uint)b * R);
+                                                           (uint)b * R
+#if QSA_DENSE_QUANT
+                                                           ,
+                                                           key_scale, value_scale, key_zp, value_zp, shift, k_param_pitch, v_param_pitch
+#endif
+        );
     }
 
     if (!pad_row) {
         const uint tail_begin = qsa_ops::num_complete_blocks(q_abs) * R;
         for (uint p = tail_begin; p <= q_abs; p++) {
-            sparse_attention_attend_span_dense<DH, DV, HKV, 1>(q, acc, running_max, running_sum, key, value, batch, kv_head, k_seq_pitch, v_seq_pitch, p);
+            sparse_attention_attend_span_dense<DH, DV, HKV, 1>(q, acc, running_max, running_sum, key, value, batch, kv_head, k_seq_pitch, v_seq_pitch, p
+#if QSA_DENSE_QUANT
+                                                               ,
+                                                               key_scale, value_scale, key_zp, value_zp, shift, k_param_pitch, v_param_pitch
+#endif
+            );
         }
     }
 

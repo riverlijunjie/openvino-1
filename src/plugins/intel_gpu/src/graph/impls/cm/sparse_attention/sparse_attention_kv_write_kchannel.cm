@@ -1,0 +1,142 @@
+// Copyright (C) 2018-2026 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
+//
+
+// Q0 - SparsePA main key cache write for BY_CHANNEL quantized keys.
+//
+// One work-item owns one (sequence, token group, kv head). A group is QSA_K_GROUP consecutive tokens of one
+// page that share one scale / zero-point per channel, so appending a token re-quantizes the whole group:
+// pass 1 streams the group rows (cached tokens dequantized with their old parameters, new tokens from the
+// key input) to get the per-channel range, pass 2 re-quantizes and rewrites every row, then the group
+// parameters are rewritten. Groups that hold no new token are never touched.
+//
+// JIT constants: QSA_KV_HEADS, QSA_K_HEAD_SIZE, QSA_PAGE_SIZE, QSA_K_{BITS,SYM,GROUP,ROW_BYTES,PAGE_BYTES,PARAM_OFFSET}
+//
+// Dispatch: gws = [tokens / QSA_K_GROUP + 2 * num_seqs, QSA_KV_HEADS, 1], lws = [1, 1, 1]
+
+#ifndef ATTR
+#define ATTR [[type("svmptr_t")]]
+#endif
+
+#include "qsa_kv_quant.hpp"
+#include "qsa_ops_common.hpp"
+
+extern "C" _GENX_MAIN_ void KERNEL_NAME(const half* key ATTR,                      // [num_tokens, Hkv*Dh] token-major
+                                        const int32_t* past_lens ATTR,             // [num_seqs]
+                                        const int32_t* block_indices ATTR,         // [used_blocks]
+                                        const int32_t* block_indices_begins ATTR,  // [num_seqs+1]
+                                        const int32_t* subsequence_begins ATTR,    // [num_seqs+1]
+                                        uint8_t* key_cache ATTR,                   // [num_blocks, Hkv, page_size + parameter rows, row bytes]
+                                        uint32_t key_pitch,
+                                        uint32_t key_offset,
+                                        uint32_t num_seqs) {
+    constexpr uint KV_HEADS = QSA_KV_HEADS;
+    constexpr uint DH = QSA_K_HEAD_SIZE;
+    constexpr uint PAGE = QSA_PAGE_SIZE;
+    constexpr uint G = QSA_K_GROUP;
+    constexpr uint BITS = QSA_K_BITS;
+    constexpr uint ROWB = QSA_K_ROW_BYTES;
+    constexpr uint REC_BYTES = DH * (QSA_K_SYM ? 2 : 4);
+    constexpr float QMAX = BITS == 8 ? 255.0f : 15.0f;
+
+    static_assert(PAGE % G == 0, "a group must fit a page");
+
+    const uint head = cm_global_id(1);
+    uint seq = 0, group = 0;
+    if (head >= KV_HEADS || !qsa_kvq::resolve_group_wg(subsequence_begins, past_lens, num_seqs, cm_global_id(0), G, seq, group)) {
+        return;
+    }
+
+    const uint seq_begin = (uint)subsequence_begins[seq];
+    const uint past = (uint)past_lens[seq];
+    const uint total = past + (uint)subsequence_begins[seq + 1] - seq_begin;
+    const uint g0 = group * G;
+    const uint n_valid = total - g0 < G ? total - g0 : G;
+    const uint n_old = past > g0 ? (past - g0 < n_valid ? past - g0 : n_valid) : 0;
+
+    const uint tok0 = g0 % PAGE;
+    const uint physical_page = (uint)block_indices[(uint)block_indices_begins[seq] + g0 / PAGE];
+    const uint pb = qsa_kvq::page_base(physical_page, head, KV_HEADS, QSA_K_PAGE_BYTES);
+    const uint rec = pb + QSA_K_PARAM_OFFSET + (tok0 / G) * REC_BYTES;
+
+    vector<half, DH> old_scale = 1.0f;
+    vector<half, DH> old_zp = 0.0f;
+    if (n_old > 0) {
+        qsa_gr::load_hv<DH>(old_scale, (const half*)(key_cache + rec), 0);
+#if QSA_K_SYM
+        old_zp = (half)qsa_kvq::zero_code_sym<BITS>();
+#else
+        qsa_gr::load_hv<DH>(old_zp, (const half*)(key_cache + rec + DH * 2), 0);
+#endif
+    }
+
+    // Pass 1: per-channel range, always including 0 so that the zero point stays inside the f16 range.
+    vector<float, DH> mn = 0.0f;
+    vector<float, DH> mx = 0.0f;
+    for (uint t = 0; t < n_valid; t++) {
+        vector<half, DH> h;
+        if (t < n_old) {
+            vector<uint8_t, ROWB> raw;
+            qsa_kvq::load_bytes<ROWB>(raw, key_cache, pb + (tok0 + t) * ROWB);
+            qsa_kvq::unpack_codes<DH, BITS>(h, raw);
+            h = (h - old_zp) * old_scale;
+        } else {
+            qsa_gr::load_hv<DH>(h, key, key_offset + (seq_begin + (g0 + t - past)) * key_pitch + head * DH);
+        }
+        vector<float, DH> x = h;
+        mn = cm_min<float>(mn, x);
+        mx = cm_max<float>(mx, x);
+    }
+
+    vector<float, DH> scale;
+    vector<float, DH> zero;
+#if QSA_K_SYM
+    scale = cm_max<float>(mx, -mn) / (BITS == 8 ? 127.0f : 7.0f);
+    scale = cm_max<float>(scale, qsa_kvq::MIN_SCALE);
+    zero = qsa_kvq::zero_code_sym<BITS>();
+#else
+    scale = (mx - mn) / QMAX;
+    scale = cm_max<float>(scale, qsa_kvq::MIN_SCALE);
+    zero = -mn * cm_inv(scale);
+#endif
+    vector<half, DH> scale_h = scale;
+    vector<half, DH> zero_h = zero;
+    vector<float, DH> inv = scale_h;
+    inv = cm_inv(inv);
+    vector<float, DH> zero_f = zero_h;
+
+    // Pass 2: re-quantize every row of the group with the new parameters.
+    for (uint t = 0; t < n_valid; t++) {
+        vector<half, DH> h;
+        const uint row_off = pb + (tok0 + t) * ROWB;
+        if (t < n_old) {
+            vector<uint8_t, ROWB> raw;
+            qsa_kvq::load_bytes<ROWB>(raw, key_cache, row_off);
+            qsa_kvq::unpack_codes<DH, BITS>(h, raw);
+            h = (h - old_zp) * old_scale;
+        } else {
+            qsa_gr::load_hv<DH>(h, key, key_offset + (seq_begin + (g0 + t - past)) * key_pitch + head * DH);
+        }
+        vector<float, DH> y = h;
+        y = y * inv + zero_f;
+        y = cm_max<float>(y, 0.0f);
+        y = cm_min<float>(y, QMAX);
+        y += 0.5f;
+        vector<uint8_t, DH> q = y;
+        vector<uint8_t, ROWB> packed;
+#if QSA_K_BITS == 8
+        packed = q;
+#else
+        vector<uint16_t, DH / 2> lo = q.select<DH / 2, 2>(0);
+        vector<uint16_t, DH / 2> hi = q.select<DH / 2, 2>(1);
+        vector<uint16_t, DH / 2> byte = lo | (hi << 4);
+        packed = byte;
+#endif
+        qsa_kvq::store_bytes<ROWB>(key_cache, row_off, packed);
+    }
+
+    qsa_gr::store_hv<DH>((half*)(key_cache + rec), 0, scale_h);
+#if !QSA_K_SYM
+    qsa_gr::store_hv<DH>((half*)(key_cache + rec + DH * 2), 0, zero_h);
+#endif
+}

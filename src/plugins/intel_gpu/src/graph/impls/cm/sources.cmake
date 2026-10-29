@@ -13,6 +13,7 @@ set(GPU_CM_IMPL_SOURCES
     ${CMAKE_CURRENT_LIST_DIR}/include/qsa_common.hpp
     ${CMAKE_CURRENT_LIST_DIR}/include/qsa_dpas_common.hpp
     ${CMAKE_CURRENT_LIST_DIR}/include/qsa_gr_common.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/include/qsa_kv_quant.hpp
     ${CMAKE_CURRENT_LIST_DIR}/include/qsa_ops_common.hpp
     ${CMAKE_CURRENT_LIST_DIR}/include/sort.hpp
     ${CMAKE_CURRENT_LIST_DIR}/include/xattn_subseq_meta.hpp
@@ -64,6 +65,7 @@ set(GPU_CM_KERNEL_SOURCES
     ${CMAKE_CURRENT_LIST_DIR}/sparse_attention/sparse_attention_dense_split.cm
     ${CMAKE_CURRENT_LIST_DIR}/sparse_attention/sparse_attention_dense_split_reduce.cm
     ${CMAKE_CURRENT_LIST_DIR}/sparse_attention/sparse_attention_kv_write.cm
+    ${CMAKE_CURRENT_LIST_DIR}/sparse_attention/sparse_attention_kv_write_kchannel.cm
     ${CMAKE_CURRENT_LIST_DIR}/sparse_attention/sparse_attention_paged.cm
     ${CMAKE_CURRENT_LIST_DIR}/sparse_attention/sparse_attention_paged_dpas.cm
     ${CMAKE_CURRENT_LIST_DIR}/sparse_attention/sparse_attention_paged_gqa_dpas.cm
