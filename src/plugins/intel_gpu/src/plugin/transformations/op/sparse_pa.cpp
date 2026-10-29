@@ -13,47 +13,17 @@ namespace ov::intel_gpu::op {
 
 using namespace qsa_util;
 
-namespace {
-
-void visit_kv_quant(ov::AttributeVisitor& visitor, const std::string& prefix, KVQuant& quant) {
-    auto mode = static_cast<int32_t>(quant.mode);
-    auto bits = static_cast<int32_t>(quant.bits);
-    auto group_size = static_cast<int32_t>(quant.group_size);
-    visitor.on_attribute(prefix + "quant_mode", mode);
-    visitor.on_attribute(prefix + "quant_bits", bits);
-    visitor.on_attribute(prefix + "quant_symmetric", quant.symmetric);
-    visitor.on_attribute(prefix + "quant_group_size", group_size);
-    quant.mode = static_cast<KVQuant::Mode>(mode);
-    quant.bits = static_cast<uint8_t>(bits);
-    quant.group_size = static_cast<uint16_t>(group_size);
-}
-
-}  // namespace
-
 SparsePA::SparsePA(const ov::OutputVector& args, const Config& config) : Base(args, static_cast<int64_t>(config.key_block_size)), m_config(config) {
     constructor_validate_and_infer_types();
 }
 
 bool SparsePA::validate_config(const Config& c, std::string& reason) {
-    if (!validate_sparse_attention_config(c, reason)) {
-        return false;
-    }
-    if (c.page_size != 0 && c.page_size % c.key_block_size != 0) {
-        reason = "key_block_size must divide the page size";
-        return false;
-    }
-    if (c.kv_quantized()) {
-        if (!validate_kv_quant(c.key_quant, true, c.page_size, c.k_head_size, c.key_block_size, reason) ||
-            !validate_kv_quant(c.value_quant, false, c.page_size, c.v_head_size, c.key_block_size, reason)) {
-            return false;
-        }
-    }
-    return true;
+    return validate_sparse_attention_config(c, reason);
 }
 
 bool SparsePA::has_sinks() const {
     const auto& ps = get_input_partial_shape(InputIdx::SINKS);
-    return ps.rank().is_dynamic() || ps.size() != 1 || ps[0].is_dynamic() || ps[0].get_length() != 0;
+    return !ps.rank().is_static() || ps.size() != 1 || !ps[0].is_static() || ps[0].get_length() != 0;
 }
 
 bool SparsePA::visit_attributes(ov::AttributeVisitor& visitor) {
