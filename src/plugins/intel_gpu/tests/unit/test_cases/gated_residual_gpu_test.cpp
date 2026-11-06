@@ -272,7 +272,7 @@ struct gr_read_case {
 
 class gated_residual_read_test : public ::testing::TestWithParam<gr_read_case> {};
 
-/// Runs one READ / FINAL_MIX case with the GPU_GR_READ_PATH debug option set to `path` (the default when empty) and compares the
+/// Runs one READ / FINAL_MIX case with the GPU_GR_KERNEL_SELECTION debug option set to `path` (the default when empty) and compares the
 /// outputs with the fp32 reference. `expected_stages` are the stages the node must execute (default: expected_read_stages()).
 void check_read_case(const gr_read_case& tc, const std::string& path, const std::vector<std::string>* expected_stages) {
     if (!gr_available()) {
@@ -338,11 +338,11 @@ void check_read_case(const gr_read_case& tc, const std::string& path, const std:
     config.set_property(ov::intel_gpu::allow_new_shape_infer(true));
 #ifdef GPU_DEBUG_CONFIG
     if (!path.empty()) {
-        config.set_property(ov::intel_gpu::gr_read_path(path));
+        config.set_property(ov::intel_gpu::gr_kernel_selection(path));
     }
 #else
     if (!path.empty()) {
-        GTEST_SKIP() << "GPU_GR_READ_PATH is a debug option";
+        GTEST_SKIP() << "GPU_GR_KERNEL_SELECTION is a debug option";
     }
 #endif
     network network(engine, topology, config);
@@ -382,7 +382,7 @@ void check_read_case(const gr_read_case& tc, const std::string& path, const std:
 
 TEST_P(gated_residual_read_test, matches_fp32_reference) {
     if (auto_may_use_onednn(GetParam().rows)) {
-        GTEST_SKIP() << "auto may take the oneDNN path (GPU_GR_READ_PATH=ocl is a debug option)";
+        GTEST_SKIP() << "auto may take the oneDNN path (GPU_GR_KERNEL_SELECTION=ocl is a debug option)";
     }
     check_read_case(GetParam(), ocl_path, nullptr);
 }
@@ -612,8 +612,7 @@ gr_run_result run_gr_read(const gr_ref_params& p,
                           const std::vector<float>& gain,
                           const std::vector<memory::ptr>& weights,
                           bool write_gate = false,
-                          const std::string& path = "",
-                          bool force_scalar = false) {
+                          const std::string& path = "") {
     auto& engine = get_test_engine();
     const size_t CD = p.C * p.D;
     auto residual_mem = make_f16(engine, {static_cast<int64_t>(p.rows), static_cast<int64_t>(CD)}, residual);
@@ -633,10 +632,7 @@ gr_run_result run_gr_read(const gr_ref_params& p,
     config.set_property(ov::intel_gpu::allow_new_shape_infer(true));
 #ifdef GPU_DEBUG_CONFIG
     if (!path.empty()) {
-        config.set_property(ov::intel_gpu::gr_read_path(path));
-    }
-    if (force_scalar) {
-        config.set_property(ov::intel_gpu::gr_force_scalar(true));
+        config.set_property(ov::intel_gpu::gr_kernel_selection(path));
     }
 #endif
     network network(engine, topology, config);
@@ -662,16 +658,16 @@ struct gr_quant_case {
     bool write_gate = false;
     bool is_signed = false;
     bool has_zp = true;
-    size_t group = 0;  // see make_quant_matrix
-    bool scalar = false;  // the scalar gr_read.cl (GPU_GR_FORCE_SCALAR), which dequantizes in registers too
+    size_t group = 0;     // see make_quant_matrix
+    bool scalar = false;  // the scalar gr_read.cl (GPU_GR_KERNEL_SELECTION=scalar), which dequantizes in registers too
 };
 
 size_t scratch_limit_bytes() {
-    return GPU_DEBUG_VALUE_OR(finalized_test_config().get_gr_q_scratch_limit_mb(), size_t{256}) << 20;
+    return GPU_DEBUG_VALUE_OR(finalized_test_config().get_gr_scratch_limit_mb(), size_t{256}) << 20;
 }
 
 size_t pd_min_rows() {
-    const int64_t rows = GPU_DEBUG_VALUE_OR(finalized_test_config().get_gr_pd_min_rows(), int64_t{-1});
+    const int64_t rows = GPU_DEBUG_VALUE_OR(finalized_test_config().get_gr_pd_row_threshold(), int64_t{-1});
     return rows >= 0 ? static_cast<size_t>(rows) : 5 * static_cast<size_t>(get_test_engine().get_device_info().execution_units_count);
 }
 
@@ -696,7 +692,7 @@ TEST_P(gated_residual_quant_test, matches_decompressed_f16_path) {
     }
 #ifndef GPU_DEBUG_CONFIG
     if (tc.scalar) {
-        GTEST_SKIP() << "GPU_GR_FORCE_SCALAR is a debug option";
+        GTEST_SKIP() << "GPU_GR_KERNEL_SELECTION is a debug option";
     }
 #endif
     gr_ref_params p;
@@ -737,10 +733,10 @@ TEST_P(gated_residual_quant_test, matches_decompressed_f16_path) {
         }
     }
     if (!tc.scalar && auto_may_use_onednn(p.rows)) {
-        GTEST_SKIP() << "auto may take the oneDNN path (GPU_GR_READ_PATH=ocl is a debug option)";
+        GTEST_SKIP() << "auto may take the oneDNN path (GPU_GR_KERNEL_SELECTION=ocl is a debug option)";
     }
-    const auto f16_run = run_gr_read(p, mode, residual, gain, f16_weights, tc.write_gate, ocl_path, tc.scalar);
-    const auto q_run = run_gr_read(p, mode, residual, gain, q_weights, tc.write_gate, ocl_path, tc.scalar);
+    const auto f16_run = run_gr_read(p, mode, residual, gain, f16_weights, tc.write_gate, tc.scalar ? "scalar" : ocl_path);
+    const auto q_run = run_gr_read(p, mode, residual, gain, q_weights, tc.write_gate, tc.scalar ? "scalar" : ocl_path);
 
     // compressed weights use the 3-dispatch pipeline unless its Rbar scratch exceeds the limit
     const auto expected = tc.scalar ? std::vector<std::string>{"READ"} : expected_read_stages(p.rows, p.D, p.L);
@@ -972,7 +968,7 @@ std::vector<gr_quant_case> group_size_cases() {
 
 INSTANTIATE_TEST_SUITE_P(smoke_group_sizes, gated_residual_quant_test, ::testing::ValuesIn(group_size_cases()));
 
-/// The scalar gr_read.cl (GPU_GR_FORCE_SCALAR, as on a device without systolic arrays) dequantizes in registers too: both weight
+/// The scalar gr_read.cl (GPU_GR_KERNEL_SELECTION=scalar, as on a device without systolic arrays) dequantizes in registers too: both weight
 /// widths, group sizes, zero points, signedness, FINAL_MIX and the compressed write gate (L <= 512, C * D <= 16384).
 std::vector<gr_quant_case> scalar_cases() {
     std::vector<gr_quant_case> cases;
@@ -1073,8 +1069,8 @@ TEST_P(gated_residual_onednn_quant_test, matches_fp32_reference) {
                 ASSERT_NEAR(static_cast<float>(run.gate[i]), ref_gate[i], 2e-2f) << "write gate mismatch at " << i;
             }
         }
-        std::cout << "GR_ONEDNN_QUANT " << path << " rows=" << p.rows << " D=" << p.D << " L=" << p.L << " " << (tc.is_signed ? "i" : "u") << (tc.u4 ? "4" : "8")
-                  << " g_down=" << CD / wd.G << " g_up=" << p.L / wu.G << (tc.has_zp ? "" : " nozp") << (tc.write_gate ? " gate" : "")
+        std::cout << "GR_ONEDNN_QUANT " << path << " rows=" << p.rows << " D=" << p.D << " L=" << p.L << " " << (tc.is_signed ? "i" : "u")
+                  << (tc.u4 ? "4" : "8") << " g_down=" << CD / wd.G << " g_up=" << p.L / wu.G << (tc.has_zp ? "" : " nozp") << (tc.write_gate ? " gate" : "")
                   << " err_vs_fp32_ref=" << max_abs_diff(run.mixed, ref_mixed) << std::endl;
     }
 #else
@@ -1762,7 +1758,7 @@ struct path_run {
 
 TEST(gated_residual_path_ab, DISABLED_read_paths) {
 #ifndef GPU_DEBUG_CONFIG
-    GTEST_SKIP() << "GPU_GR_READ_PATH is a debug option";
+    GTEST_SKIP() << "GPU_GR_KERNEL_SELECTION is a debug option";
 #else
     if (!gr_available() || !gr_systolic()) {
         GTEST_SKIP() << "needs the systolic READ kernels";
@@ -1858,10 +1854,10 @@ TEST(gated_residual_path_ab, DISABLED_read_paths) {
                     config.set_property(ov::enable_profiling(true));
                     // "name@N": predequantization threshold of the compressed paths (rows above N), "inf" never
                     const auto at = path.find('@');
-                    config.set_property(ov::intel_gpu::gr_read_path(path.substr(0, at)));
+                    config.set_property(ov::intel_gpu::gr_kernel_selection(path.substr(0, at)));
                     if (at != std::string::npos) {
                         const auto thr = path.substr(at + 1);
-                        config.set_property(ov::intel_gpu::gr_pd_min_rows(thr == "inf" ? int64_t{1} << 40 : std::stoll(thr)));
+                        config.set_property(ov::intel_gpu::gr_pd_row_threshold(thr == "inf" ? int64_t{1} << 40 : std::stoll(thr)));
                     }
                     auto net = std::make_unique<network>(engine, topology, config);
                     net->set_input_data("residual", residual_mem);
