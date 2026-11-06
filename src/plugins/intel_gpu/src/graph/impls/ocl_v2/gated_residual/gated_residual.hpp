@@ -16,11 +16,12 @@ namespace ov::intel_gpu::ocl {
 
 /// @brief Internal (scratch) buffers of the 3-dispatch systolic READ/FINAL_MIX pipeline.
 struct GatedResidualInternalBufIdx {
-    static constexpr size_t RBAR = 0;       ///< f16 [num_rows, C*D], branch-wise RMSNorm output
-    static constexpr size_t T_SCRATCH = 1;  ///< f16 [num_rows, L], down-projection + SiLU output
-    static constexpr size_t WD_F16 = 2;     ///< f16 [L, C*D], dequantized W_down (compressed weights with many rows)
-    static constexpr size_t WU_F16 = 3;     ///< f16 [C*D, L], dequantized W_up
-    static constexpr size_t WI_F16 = 4;     ///< f16 [C, C*D], dequantized W_inject (compressed weights with a write gate)
+    static constexpr size_t RBAR = 0;          ///< f16 [num_rows, C*D], branch-wise RMSNorm output
+    static constexpr size_t T_SCRATCH = 1;     ///< f16 [num_rows, L], down-projection + SiLU output
+    static constexpr size_t WD_F16 = 2;        ///< f16 [L, C*D], dequantized W_down (compressed weights with many rows)
+    static constexpr size_t WU_F16 = 3;        ///< f16 [C*D, L], dequantized W_up
+    static constexpr size_t WI_F16 = 4;        ///< f16 [C, C*D], dequantized W_inject (compressed weights with a write gate)
+    static constexpr size_t DNNL_SCRATCH = 5;  ///< u8, scratchpad of the oneDNN DOWN_PROJ matmul (oneDNN READ path only)
 };
 
 /// @brief OpenCL implementation of the gated residual READ/WRITE/FINAL_MIX stages.
