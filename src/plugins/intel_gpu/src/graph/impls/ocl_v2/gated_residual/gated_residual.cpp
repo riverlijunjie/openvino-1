@@ -23,6 +23,10 @@
 #include "intel_gpu/primitives/gated_residual_caps.hpp"
 #include "intel_gpu/runtime/debug_configuration.hpp"
 #include "registry/implementation_manager.hpp"
+#ifdef ENABLE_ONEDNN_FOR_GPU
+#    include "gated_residual_onednn.hpp"
+#    include "micro_utils.hpp"
+#endif
 
 namespace ov::intel_gpu::ocl {
 
@@ -31,12 +35,13 @@ namespace caps = cldnn::gated_residual_caps;
 
 namespace {
 
-constexpr size_t gr_sg = 16;           // subgroup size == one Xe2 hardware thread
-constexpr size_t gr_wg_size = 16;      // subgroups of the scalar / single-kernel work-groups
-constexpr size_t gr_dpas_k_step = 32;  // K consumed per dpas loop step (two K16 slices)
-constexpr size_t gr_dpas_n = 16;       // dpas N axis == GRF width on Xe2
-constexpr size_t gr_down_tn = 32;      // low-rank columns per down-projection subgroup
-constexpr size_t gr_decode_rows = 32;  // up to here both GEMMs use decode tiling
+constexpr size_t gr_sg = 16;                  // subgroup size == one Xe2 hardware thread
+constexpr size_t gr_wg_size = 16;             // subgroups of the scalar / single-kernel work-groups
+constexpr size_t gr_dpas_k_step = 32;         // K consumed per dpas loop step (two K16 slices)
+constexpr size_t gr_dpas_n = 16;              // dpas N axis == GRF width on Xe2
+constexpr size_t gr_down_tn = 32;             // low-rank columns per down-projection subgroup
+constexpr size_t gr_decode_rows = 32;         // up to here both GEMMs use decode tiling
+constexpr size_t gr_up_micro_mid_rows = 128;  // up to here the micro-GEMM UP_PROJ uses the narrower token tiling
 constexpr size_t gr_read_dpas_tm = 32;
 constexpr size_t gr_read_dpas_nt = 2;
 
@@ -127,6 +132,12 @@ GrTier gr_down_tier(size_t num_rows, const cldnn::device_info& info) {
 
 GrTier gr_up_tier(size_t num_rows) {
     return num_rows <= gr_decode_rows ? GrTier::decode : GrTier::wide;
+}
+
+/// Tier of the gate-only dispatch of the oneDNN READ (its DOWN_PROJ is a matmul without the write-gate column tile): the split-K
+/// one while the token tiles do not fill the GPU.
+GrTier onednn_gate_tier(size_t num_rows, const cldnn::device_info& info) {
+    return num_rows <= gr_mid_max_rows(info) ? GrTier::mid : GrTier::wide;
 }
 
 struct GrGemmTiling {
@@ -315,15 +326,22 @@ size_t rows_of(const RuntimeParams& params, const gated_residual& desc) {
 // Kernel selection
 // ---------------------------------------------------------------------------
 
-/// READ / FINAL_MIX kernels (the GPU_GR_KERNEL_SELECTION debug option). `auto`: the row count picks between the 3-dispatch pipeline and
-/// the single kernel. `ocl3` / `single` force one of them. `scalar`: the scalar gr_read kernel (caps::has_systolic is false).
-enum class GrPath { automatic, ocl3, single, scalar };
+/// READ / FINAL_MIX path (the GPU_GR_KERNEL_SELECTION debug option). `auto`: the device, the weights and the row count pick among the
+/// OpenCL paths and the oneDNN one (gr_auto_onednn). `ocl`: OpenCL only, the row count picks between the 3-dispatch pipeline and
+/// the single kernel. `ocl3` / `single` force one of them. `scalar`: the scalar gr_read kernel (caps::has_systolic is false). `onednn`: RBAR, a oneDNN matmul
+/// as DOWN_PROJ, [GATE] and a oneDNN micro-GEMM as UP_PROJ; `onednn_q` keeps a compressed W_up compressed, `onednn_pd_up` dequantizes it into f16 scratch
+/// first. The oneDNN paths come last (gr_onednn_path).
+enum class GrPath { automatic, ocl, ocl3, single, scalar, onednn, onednn_q, onednn_pd_up };
 
 GrPath gr_kernel_selection(const RuntimeParams& params) {
     static constexpr std::pair<std::string_view, GrPath> paths[] = {{"auto", GrPath::automatic},
+                                                                    {"ocl", GrPath::ocl},
                                                                     {"ocl3", GrPath::ocl3},
                                                                     {"single", GrPath::single},
-                                                                    {"scalar", GrPath::scalar}};
+                                                                    {"scalar", GrPath::scalar},
+                                                                    {"onednn", GrPath::onednn},
+                                                                    {"onednn_q", GrPath::onednn_q},
+                                                                    {"onednn_pd_up", GrPath::onednn_pd_up}};
     const auto name = GPU_DEBUG_VALUE_OR(params.get_program().get_config().get_gr_kernel_selection(), std::string("auto"));
     for (const auto& [key, path] : paths) {
         if (name == key) {
@@ -334,12 +352,85 @@ GrPath gr_kernel_selection(const RuntimeParams& params) {
     return GrPath::automatic;
 }
 
-/// A compressed READ above this many rows dequantizes both matrices into f16 scratch first and runs the f16 kernels: below
-/// ~4 rows per EU the dequantizing GEMM kernels win, above ~5 rows per EU the f16 single kernel (no Rbar / T scratch traffic,
-/// weights hot in cache) does. The GPU_GR_PD_ROW_THRESHOLD debug option overrides it.
-size_t gr_pd_min_rows(const RuntimeParams& params) {
+bool gr_onednn_path(GrPath path) {
+    return path >= GrPath::onednn;
+}
+
+/// The OpenCL paths that pick their kernels by row count (the others force one).
+bool gr_ocl_routed(GrPath path) {
+    return path == GrPath::automatic || path == GrPath::ocl;
+}
+
+bool gr_integrated(const RuntimeParams& params) {
+    return params.get_device_info().dev_type == cldnn::device_type::integrated_gpu;
+}
+
+/// The oneDNN READ needs the dpas kernels, IMMAD and oneDNN enabled in the config (its stream needs the in-order queue that comes with
+/// it). The weights are f16 or compressed: both GEMMs dequantize them on the fly.
+bool gr_onednn_eligible(const RuntimeParams& params) {
+#ifdef ENABLE_ONEDNN_FOR_GPU
+    return params.typed_desc<gated_residual>()->mode != gated_residual::Mode::WRITE && can_use_dpas_gr_read(params) &&
+           params.get_device_info().supports_immad && params.get_program().get_config().get_use_onednn();
+#else
+    return false;
+#endif
+}
+
+/// Weight volume (C * D * L elements) from which the f16 weights (>= 16 MB per matrix) no longer stay cache resident in the single
+/// kernel and are re-read per row tile; measured: D = 5120 / L = 640 (13.1M) is above, D = 2560 / L = 320 (3.3M) below.
+constexpr size_t gr_large_weights = size_t{8} << 20;
+constexpr size_t gr_auto_decode_ocl_rows = 16;   // decode rows up to here stay on the OpenCL decode kernels
+constexpr size_t gr_auto_onednn_min_rows = 128;  // 33 .. 127 rows stay on OpenCL
+constexpr size_t gr_auto_igpu_f16_rows = 512;    // integrated GPU, small weights: oneDNN below these row counts
+constexpr size_t gr_auto_igpu_q_rows = 2048;
+
+/// GPU_GR_KERNEL_SELECTION=auto: whether `rows` token rows take the oneDNN READ, from the BMG (discrete, 456 GB/s) and PTL (integrated,
+/// 110 GB/s) measurements of all weight types. Small row counts are bound by the weight reads, where the OpenCL decode kernels
+/// win (u4 permutes its K order there, see gr_decode_kperm, so it never takes oneDNN below 33 rows). Above, the weights are re-read
+/// per row tile: the discrete GPU's bandwidth makes oneDNN win everywhere, while on the integrated GPU the single kernel (f16) or
+/// the predequantized single kernel (compressed) win as long as the weights stay cache resident (small matrices).
+bool gr_auto_onednn(const RuntimeParams& params, size_t rows) {
+    const auto desc = params.typed_desc<gated_residual>();
+    const auto wtype = gr_weight_type(params);
+    const bool large = desc->hc_count * desc->hidden_size * desc->lowrank >= gr_large_weights;
+    const bool integrated = gr_integrated(params);
+    if (rows <= gr_decode_rows) {
+        return rows > gr_auto_decode_ocl_rows && wtype != GrWType::u4 && (large || integrated);
+    }
+    if (rows < gr_auto_onednn_min_rows) {
+        return false;
+    }
+    return !integrated || large || rows < (wtype == GrWType::f16 ? gr_auto_igpu_f16_rows : gr_auto_igpu_q_rows);
+}
+
+/// Row count the oneDNN DOWN matmul is created for: dynamic row counts share the matmuls of a few buckets (at most 12.5% extra
+/// rows) instead of creating one primitive per count.
+size_t gr_onednn_rows(size_t rows) {
+    size_t octave = 1;
+    while (octave * 2 <= rows) {
+        octave *= 2;
+    }
+    const size_t step = std::max<size_t>(16, octave / 8);
+    return std::max<size_t>(1, gr_div_up(rows, step)) * step;
+}
+
+/// The GPU_GR_PD_ROW_THRESHOLD debug option: overrides both predequantization thresholds below.
+std::optional<size_t> gr_pd_rows_option(const RuntimeParams& params) {
     const int64_t rows = GPU_DEBUG_VALUE_OR(params.get_program().get_config().get_gr_pd_row_threshold(), int64_t{-1});
-    return rows >= 0 ? static_cast<size_t>(rows) : 5 * static_cast<size_t>(params.get_device_info().execution_units_count);
+    return rows >= 0 ? std::optional<size_t>(static_cast<size_t>(rows)) : std::nullopt;
+}
+
+/// A compressed OpenCL READ above this many rows dequantizes both matrices into f16 scratch first and runs the f16 kernels: below
+/// ~4 rows per EU the dequantizing GEMM kernels win, above ~5 rows per EU the f16 single kernel (no Rbar / T scratch traffic,
+/// weights hot in cache) does.
+size_t gr_pd_min_rows(const RuntimeParams& params) {
+    return gr_pd_rows_option(params).value_or(5 * static_cast<size_t>(params.get_device_info().execution_units_count));
+}
+
+/// A compressed oneDNN READ above this many rows dequantizes W_up into f16 scratch first (a ~0.1 ms kernel that lets the UP
+/// micro-GEMM read f16); measured on a discrete GPU it pays off from 512 - 1024 rows.
+size_t gr_pd_up_min_rows(const RuntimeParams& params) {
+    return gr_pd_rows_option(params).value_or(1000);
 }
 
 /// Rows whose Rbar scratch (rows * C*D * 2 bytes) of the compressed 3-dispatch pipeline fits the GPU_GR_SCRATCH_LIMIT_MB limit;
@@ -350,35 +441,55 @@ size_t gr_q_scratch_max_rows(const RuntimeParams& params) {
     return limit / (desc->hc_count * desc->hidden_size * 2);
 }
 
+/// The integrated GPU's bandwidth makes the doubled f16 W_up traffic lose to the on-the-fly dequantization.
+bool gr_onednn_pd_up(const RuntimeParams& params, GrPath path, size_t rows) {
+    if (gr_weight_type(params) == GrWType::f16 || path == GrPath::onednn_q) {
+        return false;
+    }
+    return path == GrPath::onednn_pd_up || (!gr_integrated(params) && rows > gr_pd_up_min_rows(params));
+}
+
 /// Above the mid tier the single systolic kernel gr_read_dpas beats the 3-dispatch pipeline and needs no scratch; below it the
 /// pipeline's split-K tiers parallelize better.
 bool gr_single_f16(const RuntimeParams& params, GrPath path, size_t rows) {
     return params.typed_desc<gated_residual>()->hidden_size % 32 == 0 &&
-           (path == GrPath::single || (path == GrPath::automatic && rows > gr_mid_max_rows(params.get_device_info())));
+           (path == GrPath::single || (gr_ocl_routed(path) && rows > gr_mid_max_rows(params.get_device_info())));
 }
 
 bool gr_single_q(const RuntimeParams& params, GrPath path, size_t rows) {
     return params.typed_desc<gated_residual>()->hidden_size % 32 == 0 &&
-           (path == GrPath::single || (path == GrPath::automatic && rows > gr_q_scratch_max_rows(params)));
+           (path == GrPath::single || (gr_ocl_routed(path) && rows > gr_q_scratch_max_rows(params)));
 }
 
 /// The dispatches of one READ / FINAL_MIX on the dpas path for `rows` token rows.
 struct ReadPlan {
     bool q = false;              // compressed weights
     GrTier tier = GrTier::wide;  // DOWN_PROJ tier of the 3-dispatch pipeline
-    bool pd = false;             // both matrices dequantized into f16 scratch first
-    bool single = false;         // one gr_read_dpas dispatch
-    bool gate_dispatch = false;  // separate write-gate dispatch (compressed weights, shared DOWN_PROJ)
+    bool onednn = false;         // RBAR, oneDNN matmul DOWN_PROJ, [GATE], micro-GEMM UP_PROJ
+    bool pd_up = false;          // oneDNN: W_up dequantized into f16 scratch first
+    bool pd = false;             // OpenCL: both matrices dequantized into f16 scratch first
+    bool single = false;         // OpenCL: one gr_read_dpas dispatch
+    bool gate_dispatch = false;  // OpenCL: separate write-gate dispatch (compressed weights, shared DOWN_PROJ)
     bool dq_inject = false;      // compressed W_inject dequantized into f16 scratch
 };
 
 ReadPlan read_plan(const RuntimeParams& params, size_t rows) {
     const auto desc = params.typed_desc<gated_residual>();
-    const auto path = gr_kernel_selection(params);
+    const bool onednn_eligible = gr_onednn_eligible(params);
+    auto path = gr_kernel_selection(params);
+    if (gr_onednn_path(path) && !onednn_eligible) {
+        path = GrPath::ocl;
+    }
     ReadPlan p;
     p.q = gr_weight_type(params) != GrWType::f16;
     p.tier = gr_down_tier(rows, params.get_device_info());
     const bool gate_q = p.q && desc->produce_write_gate;
+    p.onednn = onednn_eligible && (path == GrPath::automatic ? gr_auto_onednn(params, rows) : gr_onednn_path(path));
+    if (p.onednn) {
+        p.pd_up = gr_onednn_pd_up(params, path, rows);
+        p.dq_inject = gate_q;  // the gate-only kernel reads an f16 W_inject
+        return p;
+    }
     // The compressed single kernel has no write-gate tile: with a write gate that regime predequantizes as well.
     const bool single_q = p.q && gr_single_q(params, path, rows);
     p.pd = p.q && (rows > gr_pd_min_rows(params) || (gate_q && single_q));
@@ -390,23 +501,29 @@ ReadPlan read_plan(const RuntimeParams& params, size_t rows) {
 
 /// 4-bit decode GEMMs unpack their weights in a permuted K order and read Rbar / T stored with the same permutation (GR_KP). The
 /// decode RBAR cannot know the row count of a dynamic shape, so this holds only when no decode row count takes the predequantized,
-/// or single-kernel path; each of them holds for the largest decode row count if it holds for any.
+/// single-kernel or oneDNN path; each of them holds for the largest decode row count if it holds for any.
 bool gr_decode_kperm(const RuntimeParams& params) {
     // the decode RBAR permutes in registers: 128-half chunks, 8 halves per lane
     if (gr_weight_type(params) != GrWType::u4 || gr_best_tile(params.typed_desc<gated_residual>()->hidden_size) != 128) {
         return false;
     }
     const auto p = read_plan(params, gr_decode_rows);
-    return !p.pd && !p.single;
+    return !p.onednn && !p.pd && !p.single;
 }
 
 /// Row counts on both sides of every threshold of read_plan() and of the stage variants. The stages are a step function of the
 /// row count, so these yield every stage some row count runs (what a dynamic shape has to build).
 std::vector<size_t> gr_routing_rows(const RuntimeParams& params) {
     const size_t thresholds[] = {gr_gemv_rows,
+                                 gr_auto_decode_ocl_rows,
                                  gr_decode_rows,
+                                 gr_auto_onednn_min_rows - 1,
+                                 gr_up_micro_mid_rows,
+                                 gr_auto_igpu_f16_rows - 1,
+                                 gr_auto_igpu_q_rows - 1,
                                  gr_mid_max_rows(params.get_device_info()),
                                  gr_pd_min_rows(params),
+                                 gr_pd_up_min_rows(params),
                                  gr_q_scratch_max_rows(params)};
     std::vector<size_t> rows = {1};
     for (const size_t t : thresholds) {
@@ -861,8 +978,11 @@ protected:
         return jit;
     }
 
-    [[nodiscard]] Arguments get_arguments_desc(const RuntimeParams& /*params*/) const override {
-        return {gr_scratch(GatedResidualInternalBufIdx::RBAR), gr_scratch(GatedResidualInternalBufIdx::WI_F16), gr_output(1), gr_num_rows_arg()};
+    [[nodiscard]] Arguments get_arguments_desc(const RuntimeParams& params) const override {
+        // an f16 W_inject is read in place (the oneDNN READ), a compressed one was dequantized into f16 scratch
+        const auto w_inject =
+            gr_weight_type(params) == GrWType::f16 ? gr_input(gr_read_layout(params).w_inject) : gr_scratch(GatedResidualInternalBufIdx::WI_F16);
+        return {gr_scratch(GatedResidualInternalBufIdx::RBAR), w_inject, gr_output(1), gr_num_rows_arg()};
     }
 
     [[nodiscard]] DispatchDataFunc get_dispatch_data_func() const override {
@@ -985,6 +1105,234 @@ private:
     bool m_q;
     bool m_pd;
 };
+
+// ---------------------------------------------------------------------------
+// UP_PROJ of the oneDNN READ on a micro-GEMM
+// ---------------------------------------------------------------------------
+#ifdef ENABLE_ONEDNN_FOR_GPU
+/// mixed = (1/C) * sum_c sigmoid(T . W_up[c]^T) * Rbar[c]: one micro-GEMM per branch inside one work-group, with the sigmoid, the
+/// product with Rbar and the branch sum applied to the accumulator tile in registers (gr_up_micro.cl). W_up is f16 or compressed
+/// (the micro-GEMM dequantizes it with the scales / zero points while loading). The variants differ in the micro-kernel tiling,
+/// chosen for the row-count regime.
+class GrUpMicroGenerator : public GrGenerator {
+public:
+    enum class Variant { decode, mid, wide };
+
+    static Variant variant_for(size_t rows) {
+        return rows <= gr_decode_rows ? Variant::decode : rows <= gr_up_micro_mid_rows ? Variant::mid : Variant::wide;
+    }
+
+    /// `pd`: W_up was dequantized into the f16 scratch matrix WU_F16.
+    explicit GrUpMicroGenerator(Variant variant, bool pd = false)
+        : GrGenerator("gr_up_micro",
+                      std::string(pd ? "pd_" : "") + (variant == Variant::decode ? "decode"
+                                                      : variant == Variant::mid  ? "mid"
+                                                                                 : "wide"),
+                      /*large_grf=*/false),
+          m_variant(variant),
+          m_pd(pd) {}
+
+    [[nodiscard]] KernelData get_kernel_data(const RuntimeParams& params) const override {
+        const auto desc = params.typed_desc<gated_residual>();
+        const auto gemm = select_microkernel(params, m_variant, m_pd);
+        const uint32_t slm_size = gemm.getSetting("slm_size");
+        auto jit = GrGenerator::get_jit_constants(params);
+        jit.make("GR_LOWRANK", desc->lowrank);
+        if (slm_size > 0) {
+            jit.make("USE_SLM", 1);
+        }
+        // whole-row blocks of the subgroup tile need D to be a multiple of it
+        const auto sg_tile_m = static_cast<size_t>(gemm.getSetting("wg_tile_m") / gemm.getSetting("sg_per_wg_m"));
+        jit.make("GR_UPM_BLOCK_RB", desc->hidden_size % sg_tile_m == 0 ? 1 : 0);
+        const bool q = gr_weight_type(params) != GrWType::f16 && !m_pd;
+        jit.make("GR_UPM_Q", q ? 1 : 0);
+        jit.make("GR_UPM_ZP", q && gr_read_layout(params).has_zp ? 1 : 0);
+
+        KernelData kd;
+        kd.code = std::make_shared<KernelString>();
+        kd.code->language = KernelLanguage::OCLC_V2;
+        kd.code->entry_point = get_entry_point(params);
+        kd.code->jit = "";
+        kd.code->undefs = "";
+        kd.code->options = get_build_options(params);
+        kd.code->batch_compilation = false;
+        kd.code->has_microkernels = true;
+        kd.code->str = build_code(get_kernel_name(), jit, kd.code->entry_point);
+
+        kd.params.arguments = get_arguments_desc(params);
+        kd.params.layerID = params.desc->id;
+        kd.update_dispatch_data_func = get_dispatch_data_func();
+        kd.need_args_update = true;
+        kd.need_dispatch_data_update = true;
+
+        micro::ShimOptions shim_options;
+        shim_options.subgroupSize = static_cast<int32_t>(gr_sg);
+        shim_options.useTileOps = true;
+        shim_options.decorator = "grup";
+        kd.code->jit += micro::generate_shim(gemm, micro::HostLanguage::OpenCL_C, shim_options);
+        if (gemm.grfMin > 128) {
+            kd.code->options += " -cl-intel-256-GRF-per-thread";
+        }
+        kd.micro_kernels.push_back(std::make_shared<micro::MicroKernelPackage>(gemm));
+
+        kd.params.local_memory_args.clear();
+        if (slm_size > 0) {
+            kd.params.local_memory_args.push_back(slm_size);
+            kd.params.arguments.push_back({ArgumentDescriptor::Types::LOCAL_MEMORY_SIZE, 0});
+        }
+        return kd;
+    }
+
+protected:
+    [[nodiscard]] std::string get_build_options(const RuntimeParams& params) const override {
+        return GrGenerator::get_build_options(params) +
+               " -Dcl_intel_dot_accumulate -Dcl_intel_global_float_atomic -Dcl_intel_subgroup_matrix_multiply_accumulate"
+               " -Dcl_intel_subgroup_split_matrix_multiply_accumulate";
+    }
+
+    [[nodiscard]] Arguments get_arguments_desc(const RuntimeParams& params) const override {
+        using Idx = GrOp::ReadInputIdx;
+        Arguments args = {gr_scratch(GatedResidualInternalBufIdx::T_SCRATCH), m_pd ? gr_scratch(GatedResidualInternalBufIdx::WU_F16) : gr_input(Idx::W_UP)};
+        if (!m_pd && gr_weight_type(params) != GrWType::f16) {
+            args.push_back(gr_input(Idx::SCALE_UP));
+            if (gr_read_layout(params).has_zp) {
+                args.push_back(gr_input(Idx::ZP_UP));
+            }
+        }
+        args.push_back(gr_scratch(GatedResidualInternalBufIdx::RBAR));
+        args.push_back(gr_output(0));  // mixed
+        args.push_back(gr_num_rows_arg());
+        return args;
+    }
+
+    [[nodiscard]] DispatchDataFunc get_dispatch_data_func() const override {
+        return DispatchDataFunc{[](const RuntimeParams& params, KernelData& kd, ImplRuntimeParams*) {
+            if (params.is_dynamic()) {
+                return;
+            }
+            const auto desc = params.typed_desc<gated_residual>();
+            const size_t num_rows = rows_of(params, *desc);
+            const auto& gemm = kd.micro_kernels[0]->p;
+            const auto sg_m = static_cast<size_t>(gemm.getSetting("sg_per_wg_m"));
+            const auto sg_n = static_cast<size_t>(gemm.getSetting("sg_per_wg_n"));
+            const auto sg_k = static_cast<size_t>(gemm.getSetting("sg_per_wg_k"));
+            const auto wg_tile_m = static_cast<size_t>(gemm.getSetting("wg_tile_m"));
+            const auto wg_tile_n = static_cast<size_t>(gemm.getSetting("wg_tile_n"));
+
+            auto& wgs = kd.params.workGroups;
+            wgs.local = {sg_m * gr_sg, sg_n, sg_k};
+            wgs.global = {gr_div_up(desc->hidden_size, wg_tile_m) * wgs.local[0],
+                          gr_div_up(std::max<size_t>(1, num_rows), wg_tile_n) * wgs.local[1],
+                          wgs.local[2]};
+            push_num_rows(kd, num_rows);
+        }};
+    }
+
+private:
+    static micro::Type micro_type(const ov::element::Type& t) {
+        switch (t) {
+        case ov::element::f16:
+            return micro::Type::f16;
+        case ov::element::u4:
+            return micro::Type::u4;
+        case ov::element::i4:
+            return micro::Type::s4;
+        case ov::element::u8:
+            return micro::Type::u8;
+        case ov::element::i8:
+            return micro::Type::s8;
+        default:
+            OPENVINO_THROW("[GPU][OCL] gated_residual: unsupported micro-GEMM weight type ", t);
+        }
+    }
+
+    /// A[m = C*D, k = L] = W_up (L contiguous; the branches are row blocks), B[k = L, n = tokens] = T (L contiguous), C[m, n] in f32.
+    /// Compressed A has f16 scales [G, C*D] (and zero points of the weight type) along m, shared by group_size values of k.
+    static micro::Package select_microkernel(const RuntimeParams& params, Variant variant, bool pd) {
+        // gemmstone's strategy selection is not reentrant (see the gather_matmul micro-kernel)
+        static std::mutex selection_mutex;
+        std::lock_guard<std::mutex> lock(selection_mutex);
+
+        const auto desc = params.typed_desc<gated_residual>();
+        const auto& info = params.get_device_info();
+        micro::HWInformation hw_info;
+        hw_info.euCount = info.execution_units_count;
+        hw_info.gmdid = info.ip_version;
+        hw_info.systolicAvailable = info.supports_immad;
+        // cross-thread payload of the host kernel: up to six buffers, num_rows and the SLM pointer
+        const micro::HostPayload host{static_cast<int>(gr_sg), 256};
+
+        micro::GEMMProblem problem;
+        micro::GEMMOptions opts;
+        opts.slmPtr = true;
+        opts.kParallelLocal = false;
+        problem.Ta = micro::Type::f16;
+        problem.Ta_ext = micro_type(pd ? ov::element::f16 : ov::element::Type(params.get_input_layout(GrOp::ReadInputIdx::W_UP).data_type));
+        problem.Tb = problem.Tb_ext = micro::Type::f16;
+        problem.Tc = problem.Tc_ext = micro::Type::f32;
+        problem.Ts = problem.Tc;
+        problem.A.layout = micro::MatrixLayout::T;
+        problem.B.layout = micro::MatrixLayout::N;
+        problem.C.layout = micro::MatrixLayout::N;
+        problem.A.setAlignment(micro::alignment_for_ld(static_cast<int>(desc->lowrank * problem.Ta_ext)));
+        problem.B.setAlignment(micro::alignment_for_ld(static_cast<int>(desc->lowrank * problem.Tb)));
+        problem.C.setAlignment(static_cast<int32_t>(problem.Tc.size()));
+        if (gr_weight_type(params) != GrWType::f16 && !pd) {
+            constexpr int per_matrix = 2;  // scales / zero points are 2D [G, m] matrices
+            problem.Ta_scale = micro::Type::f16;
+            problem.A_scale.setAlignment(static_cast<int>(problem.Ta_scale.size()));
+            problem.A_scale.layout = micro::MatrixLayout::N;
+            problem.asPtrDims = per_matrix;
+            problem.aqGroupM = 1;
+            problem.aqGroupK = static_cast<int>(gr_group_size(params, GrOp::ReadInputIdx::SCALE_UP, desc->lowrank));
+            opts.scaleA = true;
+            const auto layout = gr_read_layout(params);
+            if (layout.has_zp) {
+                problem.Tao = micro_type(params.get_input_layout(GrOp::ReadInputIdx::ZP_UP).data_type);
+                problem.AO.setAlignment(problem.Tao == micro::Type::u4 || problem.Tao == micro::Type::s4 ? 1 : static_cast<int>(problem.Tao.size()));
+                problem.AO.layout = micro::MatrixLayout::N;
+                problem.aoPtrDims = per_matrix;
+                problem.aOffset = micro::ABOffset::Calc;
+                opts.offsetA = true;
+            }
+        }
+
+        micro::SizeParams sizes;
+        sizes.m = static_cast<int32_t>(desc->hc_count * desc->hidden_size);
+        sizes.n = variant == Variant::decode ? 8 : 64;
+        sizes.k = static_cast<int32_t>(desc->lowrank);
+        sizes.batch = 1;
+
+        // Measured on BMG (D = 5120, f16): 32x32 subgroup tiles, 4x4 subgroups up to ~100 rows, 2x8 (more tokens sharing one W_up
+        // tile) above, 8x1 for decode (gemmstone's own choice crashes for u8 with zero points there).
+        std::vector<micro::StrategyRequirement> reqs;
+        if (variant == Variant::decode) {
+            reqs = {micro::StrategyRequirement::UnrollM == 32,
+                    micro::StrategyRequirement::UnrollN == 32,
+                    micro::StrategyRequirement::WGM == 8,
+                    micro::StrategyRequirement::WGN == 1};
+        } else {
+            reqs = {micro::StrategyRequirement::UnrollM == 32,
+                    micro::StrategyRequirement::UnrollN == 32,
+                    micro::StrategyRequirement::WGM == (variant == Variant::mid ? 4 : 2),
+                    micro::StrategyRequirement::WGN == (variant == Variant::mid ? 4 : 8)};
+        }
+        try {
+            return micro::select_gemm_microkernel(opts, host, hw_info, sizes, problem, reqs);
+        } catch (const std::runtime_error&) {
+            // no strategy with that tiling for this problem: let gemmstone choose
+        }
+        try {
+            return micro::select_gemm_microkernel(opts, host, hw_info, sizes, problem);
+        } catch (const std::runtime_error& ex) {
+            OPENVINO_THROW("[GPU][OCL] gated_residual: can't create the UP_PROJ micro-kernel (D=", desc->hidden_size, ", L=", desc->lowrank, "): ", ex.what());
+        }
+    }
+
+    Variant m_variant;
+    bool m_pd;
+};
+#endif  // ENABLE_ONEDNN_FOR_GPU
 
 // ---------------------------------------------------------------------------
 // Weight dequantization into an f16 scratch matrix (see gr_pd_min_rows)
@@ -1117,6 +1465,15 @@ public:
     Stage::Ptr gr_dq_inject = make_stage<GrDequantInjectGenerator>();
     Stage::Ptr gr_gate_mid = make_stage<GrGateProjGenerator>(GrTier::mid);
     Stage::Ptr gr_gate_wide = make_stage<GrGateProjGenerator>(GrTier::wide);
+#ifdef ENABLE_ONEDNN_FOR_GPU
+    // UP_PROJ of the oneDNN READ
+    Stage::Ptr gr_up_micro_decode = make_stage<GrUpMicroGenerator>(GrUpMicroGenerator::Variant::decode);
+    Stage::Ptr gr_up_micro_mid = make_stage<GrUpMicroGenerator>(GrUpMicroGenerator::Variant::mid);
+    Stage::Ptr gr_up_micro_wide = make_stage<GrUpMicroGenerator>(GrUpMicroGenerator::Variant::wide);
+    Stage::Ptr gr_up_micro_pd_decode = make_stage<GrUpMicroGenerator>(GrUpMicroGenerator::Variant::decode, true);
+    Stage::Ptr gr_up_micro_pd_mid = make_stage<GrUpMicroGenerator>(GrUpMicroGenerator::Variant::mid, true);
+    Stage::Ptr gr_up_micro_pd_wide = make_stage<GrUpMicroGenerator>(GrUpMicroGenerator::Variant::wide, true);
+#endif
 
     GatedResidualImpl() : PrimitiveImplOCL(GatedResidualImplementationManager::get_type_info_static()) {}
     GatedResidualImpl(const program_node& /*node*/, const RuntimeParams& params) : GatedResidualImpl() {
@@ -1154,6 +1511,20 @@ public:
             stages.push_back(p.pd ? &gr_read_dpas_pd : (p.q ? &gr_read_dpas_q : &gr_read_dpas));
             return stages;
         }
+#ifdef ENABLE_ONEDNN_FOR_GPU
+        if (p.onednn) {
+            // the DOWN_PROJ matmul runs between RBAR and the following stage, see execute_onednn_read()
+            if (p.pd_up) {
+                stages.push_back(&gr_dq_up);
+            }
+            stages.push_back(&rbar_stage(rows));
+            if (desc->produce_write_gate) {
+                stages.push_back(&gate_stage(onednn_gate_tier(rows, params.get_device_info())));
+            }
+            stages.push_back(&up_micro_stage(rows, p.pd_up));
+            return stages;
+        }
+#endif
         stages.push_back(&rbar_stage(rows));
         if (p.gate_dispatch) {
             stages.push_back(&gate_stage(p.tier));
@@ -1194,6 +1565,19 @@ public:
         return tier == GrTier::mid ? gr_gate_mid : gr_gate_wide;
     }
 
+#ifdef ENABLE_ONEDNN_FOR_GPU
+    Stage::Ptr& up_micro_stage(size_t rows, bool pd) {
+        switch (GrUpMicroGenerator::variant_for(rows)) {
+        case GrUpMicroGenerator::Variant::decode:
+            return pd ? gr_up_micro_pd_decode : gr_up_micro_decode;
+        case GrUpMicroGenerator::Variant::mid:
+            return pd ? gr_up_micro_pd_mid : gr_up_micro_mid;
+        default:
+            return pd ? gr_up_micro_pd_wide : gr_up_micro_wide;
+        }
+    }
+#endif
+
     [[nodiscard]] std::unique_ptr<primitive_impl> clone() const override {
         return make_deep_copy<GatedResidualImpl>(this);
     }
@@ -1225,12 +1609,84 @@ public:
         const auto f16_buffer = [](bool used, size_t count) {
             return BufferDescriptor{used ? std::max<size_t>(1, count) : 1, ov::element::f16};
         };
-        return {f16_buffer(!p.single, rows * cd),               // RBAR
-                f16_buffer(!p.single, rows * desc->lowrank),    // T_SCRATCH
-                f16_buffer(p.pd, desc->lowrank * cd),           // WD_F16
-                f16_buffer(p.pd, cd * desc->lowrank),           // WU_F16
-                f16_buffer(p.dq_inject, desc->hc_count * cd)};  // WI_F16
+        // the oneDNN DOWN matmul is created for a bucketed row count and reads / writes that many Rbar / T rows
+        const size_t scratch_rows = p.onednn ? gr_onednn_rows(rows) : rows;
+        std::vector<BufferDescriptor> descs = {f16_buffer(!p.single, scratch_rows * cd),             // RBAR
+                                               f16_buffer(!p.single, scratch_rows * desc->lowrank),  // T_SCRATCH
+                                               f16_buffer(p.pd, desc->lowrank * cd),                 // WD_F16
+                                               f16_buffer(p.pd || p.pd_up, cd * desc->lowrank),      // WU_F16
+                                               f16_buffer(p.dq_inject, desc->hc_count * cd)};        // WI_F16
+#ifdef ENABLE_ONEDNN_FOR_GPU
+        if (p.onednn) {
+            const auto scratchpad = gr_onednn::down_scratchpad_bytes(params.get_program().get_engine(), onednn_down_problem(params, rows));
+            descs.emplace_back(std::max<size_t>(1, scratchpad), ov::element::u8);  // DNNL_SCRATCH
+        }
+#endif
+        return descs;
     }
+
+#ifdef ENABLE_ONEDNN_FOR_GPU
+    static gr_onednn::DownProblem onednn_down_problem(const RuntimeParams& params, size_t rows) {
+        const auto desc = params.typed_desc<gated_residual>();
+        const size_t cd = desc->hc_count * desc->hidden_size;
+        gr_onednn::DownProblem problem{gr_onednn_rows(rows), cd, desc->lowrank, desc->hc_count};
+        if (gr_weight_type(params) != GrWType::f16) {
+            problem.weights = params.get_input_layout(GrOp::ReadInputIdx::W_DOWN).data_type;
+            problem.group_size = gr_group_size(params, GrOp::ReadInputIdx::SCALE_DOWN, cd);
+            problem.has_zp = gr_read_layout(params).has_zp;
+        }
+        return problem;
+    }
+
+    [[nodiscard]] event::ptr execute(const std::vector<event::ptr>& events, primitive_inst& instance) override {
+        const auto& params = *instance.get_impl_params();
+        if (!instance.can_be_optimized() && gr_onednn_eligible(params) && read_plan(params, rows_of(params, *params.typed_desc<gated_residual>())).onednn) {
+            return execute_onednn_read(events, instance);
+        }
+        return PrimitiveImplOCL::execute(events, instance);
+    }
+
+    /// RBAR (OpenCL) -> DOWN_PROJ (dnnl::matmul with the 1/C scale and SiLU as post-ops) -> [write gate (OpenCL)] -> UP_PROJ
+    /// (micro-GEMM). oneDNN runs on the in-order queue of the stream, so it needs no event dependencies; the OpenCL stages after it
+    /// are ordered by the queue as well.
+    event::ptr execute_onednn_read(const std::vector<event::ptr>& events, primitive_inst& instance) {
+        kernel_dump_info.clear_entries();
+        update_rt_params(instance);
+
+        const auto& params = *instance.get_impl_params();
+        const auto desc = params.typed_desc<gated_residual>();
+        const size_t rows = rows_of(params, *desc);
+        auto& stream = instance.get_network().get_stream();
+        const auto stages = stages_for(params, rows);
+        const auto layout = gr_read_layout(params);
+        const bool q = gr_weight_type(params) != GrWType::f16;
+        using Idx = GrOp::ReadInputIdx;
+        const auto& scratch = instance.get_intermediates_memories();
+        OPENVINO_ASSERT(scratch.size() > GatedResidualInternalBufIdx::DNNL_SCRATCH, "[GPU][OCL] gated_residual: the oneDNN scratchpad is not allocated");
+
+        std::vector<event::ptr> all_events;
+        std::vector<event::ptr> deps = events;
+        for (auto* stage : stages) {
+            auto last = execute_stage(deps, instance, *stage);
+            all_events.push_back(last);
+            deps = {last};
+            if (stage != &rbar_stage(rows)) {
+                continue;
+            }
+            gr_onednn::execute_down(stream,
+                                    instance.get_network().get_engine(),
+                                    onednn_down_problem(params, rows),
+                                    scratch[GatedResidualInternalBufIdx::RBAR],
+                                    instance.input_memory_ptr(Idx::W_DOWN),
+                                    q ? instance.input_memory_ptr(Idx::SCALE_DOWN) : nullptr,
+                                    q && layout.has_zp ? instance.input_memory_ptr(Idx::ZP_DOWN) : nullptr,
+                                    scratch[GatedResidualInternalBufIdx::T_SCRATCH],
+                                    scratch[GatedResidualInternalBufIdx::DNNL_SCRATCH]);
+            kernel_dump_info.add_entry_point("gr_onednn_matmul_down");
+        }
+        return stream.aggregate_events(all_events, true, instance.is_output());
+    }
+#endif
 };
 
 }  // namespace
