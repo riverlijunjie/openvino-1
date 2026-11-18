@@ -13,8 +13,11 @@
 //  - the READ without a write gate, which is the model-tail mixer that replaces the usual final norm.
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
+#include <cstdlib>
+#include <intel_gpu/primitives/activation.hpp>
 #include <intel_gpu/primitives/data.hpp>
 #include <intel_gpu/primitives/gated_residual.hpp>
 #include <intel_gpu/primitives/input_layout.hpp>
@@ -213,6 +216,10 @@ std::vector<std::string> executed_stages(network& net, const primitive_id& id) {
             names.emplace_back("UP_PROJ");
         } else if (starts_with("gr_read_pipeline_gate")) {
             names.emplace_back("GATE");
+        } else if (starts_with("gr_onednn_matmul_down")) {
+            names.emplace_back("DOWN_ONEDNN");
+        } else if (starts_with("gr_up_micro_")) {
+            names.emplace_back("UP_MICRO");
         } else if (starts_with("gr_read_dpas_")) {
             names.emplace_back("READ_DPAS");
         } else if (starts_with("gr_read_")) {
@@ -245,6 +252,22 @@ std::vector<std::string> expected_read_stages(size_t rows, size_t D, size_t L) {
     return pipeline_stages();
 }
 
+/// The OpenCL routing the stage expectations below describe: `auto` may pick the oneDNN path, which the debug option rules out.
+#ifdef GPU_DEBUG_CONFIG
+const std::string ocl_path = "ocl";
+#else
+const std::string ocl_path;
+#endif
+
+/// Without the debug option `auto` is the only routing: such a run is skipped where auto can take the oneDNN path.
+bool auto_may_use_onednn(size_t rows) {
+#ifdef ENABLE_ONEDNN_FOR_GPU
+    return ocl_path.empty() && get_test_engine().get_device_info().supports_immad && rows > 16;
+#else
+    return false;
+#endif
+}
+
 struct gr_read_case {
     size_t rows;
     size_t D;
@@ -255,12 +278,13 @@ struct gr_read_case {
 
 class gated_residual_read_test : public ::testing::TestWithParam<gr_read_case> {};
 
-TEST_P(gated_residual_read_test, matches_fp32_reference) {
+/// Runs one READ case with the GPU_GR_KERNEL_SELECTION debug option set to `path` (the default when empty) and compares the
+/// outputs with the fp32 reference. `expected_stages` are the stages the node must execute (default: expected_read_stages()).
+void check_read_case(const gr_read_case& tc, const std::string& path, const std::vector<std::string>* expected_stages) {
     if (!gr_available()) {
         GTEST_SKIP() << "no GatedResidual implementation is available on this device";
     }
 
-    const auto tc = GetParam();
     if (!caps::is_geometry_supported(gated_residual::Mode::READ, 4, tc.D, tc.L, gr_systolic())) {
         GTEST_SKIP() << "the geometry needs the systolic READ kernels";
     }
@@ -309,6 +333,16 @@ TEST_P(gated_residual_read_test, matches_fp32_reference) {
     ExecutionConfig config = get_test_default_config(engine);
     config.set_property(ov::intel_gpu::optimize_data(true));
     config.set_property(ov::intel_gpu::allow_new_shape_infer(true));
+
+#ifdef GPU_DEBUG_CONFIG
+    if (!path.empty()) {
+        config.set_property(ov::intel_gpu::gr_kernel_selection(path));
+    }
+#else
+    if (!path.empty()) {
+        GTEST_SKIP() << "GPU_GR_KERNEL_SELECTION is a debug option";
+    }
+#endif
     network::ptr network = get_network(engine, topology, config, get_test_stream_ptr(), tc.is_caching_test);
     network->set_input_data("residual", residual_mem);
 
@@ -316,7 +350,7 @@ TEST_P(gated_residual_read_test, matches_fp32_reference) {
     ASSERT_TRUE(outputs.count("gr_read") > 0);
 
     cldnn::mem_lock<ov::float16> mixed_out(outputs.at("gr_read").get_memory(), get_test_stream());
-    EXPECT_EQ(executed_stages(*network, "gr_read"), expected_read_stages(p.rows, p.D, p.L));
+    EXPECT_EQ(executed_stages(*network, "gr_read"), expected_stages ? *expected_stages : expected_read_stages(p.rows, p.D, p.L));
     ASSERT_EQ(mixed_out.size(), ref_mixed.size());
     float mixed_err = 0.0f;
     for (size_t i = 0; i < ref_mixed.size(); i++) {
@@ -343,6 +377,68 @@ TEST_P(gated_residual_read_test, matches_fp32_reference) {
     }
     std::cout << std::endl;
 }
+
+TEST_P(gated_residual_read_test, matches_fp32_reference) {
+    if (auto_may_use_onednn(GetParam().rows)) {
+        GTEST_SKIP() << "auto may take the oneDNN path (GPU_GR_KERNEL_SELECTION=ocl is a debug option)";
+    }
+    check_read_case(GetParam(), ocl_path, nullptr);
+}
+
+/// The oneDNN READ path: RBAR, the DOWN_PROJ dnnl::matmul (with the 1/C scale and SiLU as post-ops), the write gate kernel when
+/// requested, and the UP_PROJ micro-GEMM with the sigmoid, the Rbar product and the branch sum in registers.
+class gated_residual_onednn_read_test : public ::testing::TestWithParam<gr_read_case> {};
+
+TEST_P(gated_residual_onednn_read_test, matches_fp32_reference) {
+#ifdef ENABLE_ONEDNN_FOR_GPU
+    const auto tc = GetParam();
+    if (!gr_available() || !get_test_engine().get_device_info().supports_immad || !caps::uses_dpas_read(tc.L, gr_systolic())) {
+        GTEST_SKIP() << "the oneDNN READ needs the systolic READ kernels and oneDNN micro-GEMMs";
+    }
+    std::vector<std::string> stages = {"RBAR", "DOWN_ONEDNN"};
+    if (tc.produce_write_gate) {
+        stages.emplace_back("GATE");
+    }
+    stages.emplace_back("UP_MICRO");
+    ASSERT_NO_FATAL_FAILURE(check_read_case(tc, "onednn", &stages));
+#else
+    GTEST_SKIP() << "built without oneDNN for GPU";
+#endif
+}
+
+/// `auto` on large f16 weights (D = 5120, L = 640; the same on discrete and integrated GPUs): decode rows and 33..127 rows run
+/// OpenCL, 17..32 rows and from 128 rows on the oneDNN path.
+TEST(gated_residual_auto_path, large_f16_weights) {
+#ifdef ENABLE_ONEDNN_FOR_GPU
+    if (!gr_available() || !get_test_engine().get_device_info().supports_immad || !caps::uses_dpas_read(640, gr_systolic())) {
+        GTEST_SKIP() << "the oneDNN READ needs the systolic READ kernels and oneDNN micro-GEMMs";
+    }
+    for (const size_t rows : {8, 17, 33, 100, 128, 200}) {
+        SCOPED_TRACE(rows);
+        const bool onednn = rows == 17 || rows >= 128;
+        const std::vector<std::string> stages = onednn ? std::vector<std::string>{"RBAR", "DOWN_ONEDNN", "UP_MICRO"} : expected_read_stages(rows, 5120, 640);
+        ASSERT_NO_FATAL_FAILURE(check_read_case(gr_read_case{rows, 5120, 640, false}, "", &stages));
+    }
+#else
+    GTEST_SKIP() << "built without oneDNN for GPU";
+#endif
+}
+
+INSTANTIATE_TEST_SUITE_P(smoke,
+                         gated_residual_onednn_read_test,
+                         ::testing::Values(gr_read_case{1, 640, 320, false},
+                                           gr_read_case{1, 640, 320, true},
+                                           gr_read_case{7, 128, 32, true},
+                                           gr_read_case{17, 640, 320, true},
+                                           gr_read_case{32, 64, 32, true},
+                                           gr_read_case{37, 96, 32, false},
+                                           gr_read_case{33, 2560, 320, true},
+                                           gr_read_case{100, 2560, 320, true, true},
+                                           gr_read_case{257, 640, 320, true},
+                                           gr_read_case{1, 5120, 640, true},
+                                           gr_read_case{17, 5120, 640, true},
+                                           gr_read_case{100, 5120, 640, false, false, true},
+                                           gr_read_case{1000, 640, 320, true}));
 
 INSTANTIATE_TEST_SUITE_P(smoke,
                          gated_residual_read_test,
@@ -637,8 +733,11 @@ TEST_P(gated_residual_quant_test, matches_decompressed_f16_path) {
             q_weights.push_back(make_quant_zp(engine, wi));
         }
     }
-    const auto f16_run = run_gr_read(p, residual, gain, f16_weights, tc.write_gate, tc.scalar ? "scalar" : "", tc.is_caching_test);
-    const auto q_run = run_gr_read(p, residual, gain, q_weights, tc.write_gate, tc.scalar ? "scalar" : "", tc.is_caching_test);
+    if (!tc.scalar && auto_may_use_onednn(p.rows)) {
+        GTEST_SKIP() << "auto may take the oneDNN path (GPU_GR_KERNEL_SELECTION=ocl is a debug option)";
+    }
+    const auto f16_run = run_gr_read(p, mode, residual, gain, f16_weights, tc.write_gate, tc.scalar ? "scalar" : ocl_path, tc.is_caching_test);
+    const auto q_run = run_gr_read(p, mode, residual, gain, q_weights, tc.write_gate, tc.scalar ? "scalar" : ocl_path, tc.is_caching_test);
 
     // compressed weights use the 3-dispatch pipeline unless its Rbar scratch exceeds the limit
     const auto expected = tc.scalar ? std::vector<std::string>{"READ"} : expected_read_stages(p.rows, p.D, p.L);
@@ -898,6 +997,117 @@ std::vector<gr_quant_case> scalar_cases() {
 }
 
 INSTANTIATE_TEST_SUITE_P(smoke_scalar, gated_residual_quant_test, ::testing::ValuesIn(scalar_cases()));
+
+/// Compressed weights on the oneDNN READ path: the DOWN matmul and the UP micro-GEMM dequantize on the fly (i4 / u4 / i8 / u8, with
+/// and without zero points, per-channel and grouped scales), checked against the fp32 reference of the decompressed weights.
+class gated_residual_onednn_quant_test : public ::testing::TestWithParam<gr_quant_case> {};
+
+TEST_P(gated_residual_onednn_quant_test, matches_fp32_reference) {
+#if defined(ENABLE_ONEDNN_FOR_GPU) && defined(GPU_DEBUG_CONFIG)
+    if (!gr_compression_available() || !get_test_engine().get_device_info().supports_immad) {
+        GTEST_SKIP() << "the oneDNN READ needs an Xe2+ systolic GPU with oneDNN micro-GEMMs";
+    }
+    const auto tc = GetParam();
+    gr_ref_params p;
+    p.rows = tc.rows;
+    p.D = tc.D;
+    p.L = tc.L;
+    p.gain_plus_one = true;
+    const size_t CD = p.C * p.D;
+
+    tests::random_generator rg;
+    rg.set_seed(GET_SUITE_NAME);
+    std::mt19937 gen(4321 + static_cast<uint32_t>(tc.rows * 7 + tc.D + tc.L + (tc.u4 ? 1 : 0) + (tc.is_signed ? 2 : 0) + (tc.has_zp ? 0 : 4) + tc.group));
+    const auto residual = random_vec(rg, p.rows * CD, 1.0f);
+    const auto gain = random_vec(rg, CD, 0.5f);
+    const auto wd = make_quant_matrix(gen, p.L, CD, tc.u4, tc.is_signed, tc.has_zp, tc.group);
+    const auto wu = make_quant_matrix(gen, CD, p.L, tc.u4, tc.is_signed, tc.has_zp, tc.group);
+    const auto wi = make_quant_matrix(gen, p.C, CD, tc.u4, tc.is_signed, tc.has_zp, tc.group);
+
+    auto& engine = get_test_engine();
+    std::vector<memory::ptr> weights = {make_quant_weights(engine, wd),
+                                        make_quant_weights(engine, wu),
+                                        make_quant_scale(engine, wd),
+                                        make_quant_scale(engine, wu)};
+    if (tc.has_zp) {
+        weights.push_back(make_quant_zp(engine, wd));
+        weights.push_back(make_quant_zp(engine, wu));
+    }
+    if (tc.write_gate) {
+        weights.push_back(make_quant_weights(engine, wi));
+        weights.push_back(make_quant_scale(engine, wi));
+        if (tc.has_zp) {
+            weights.push_back(make_quant_zp(engine, wi));
+        }
+    }
+    const auto mode = gated_residual::Mode::READ;
+    for (const std::string path : {"onednn_q", "onednn_pd_up", "onednn"}) {
+        SCOPED_TRACE(path);
+        const auto run = run_gr_read(p, mode, residual, gain, weights, tc.write_gate, path);
+
+        std::vector<std::string> expected;
+        if (tc.write_gate) {
+            expected.emplace_back("DEQUANT");  // W_inject into f16 scratch
+        }
+        // `onednn` dequantizes W_up above 1000 rows on a discrete GPU (the integrated GPU's bandwidth makes that lose)
+        const bool integrated = get_test_engine().get_device_info().dev_type == cldnn::device_type::integrated_gpu;
+        if (path == "onednn_pd_up" || (path == "onednn" && !integrated && p.rows > 1000)) {
+            expected.emplace_back("DEQUANT");
+        }
+        expected.emplace_back("RBAR");
+        expected.emplace_back("DOWN_ONEDNN");
+        if (tc.write_gate) {
+            expected.emplace_back("GATE");
+        }
+        expected.emplace_back("UP_MICRO");
+        EXPECT_EQ(run.stages, expected);
+
+        std::vector<float> ref_mixed;
+        std::vector<float> ref_gate;
+        reference_read(p, residual, gain, wd.dequant, wu.dequant, tc.write_gate ? &wi.dequant : nullptr, ref_mixed, ref_gate);
+        ASSERT_EQ(run.mixed.size(), ref_mixed.size());
+        for (size_t i = 0; i < ref_mixed.size(); i++) {
+            ASSERT_NEAR(static_cast<float>(run.mixed[i]), ref_mixed[i], 2e-2f) << "mixed mismatch at " << i;
+        }
+        if (tc.write_gate) {
+            ASSERT_EQ(run.gate.size(), ref_gate.size());
+            for (size_t i = 0; i < ref_gate.size(); i++) {
+                ASSERT_NEAR(static_cast<float>(run.gate[i]), ref_gate[i], 2e-2f) << "write gate mismatch at " << i;
+            }
+        }
+        std::cout << "GR_ONEDNN_QUANT " << path << " rows=" << p.rows << " D=" << p.D << " L=" << p.L << " " << (tc.is_signed ? "i" : "u")
+                  << (tc.u4 ? "4" : "8") << " g_down=" << CD / wd.G << " g_up=" << p.L / wu.G << (tc.has_zp ? "" : " nozp") << (tc.write_gate ? " gate" : "")
+                  << " err_vs_fp32_ref=" << max_abs_diff(run.mixed, ref_mixed) << std::endl;
+    }
+#else
+    GTEST_SKIP() << "needs oneDNN for GPU and the debug options";
+#endif
+}
+
+INSTANTIATE_TEST_SUITE_P(smoke,
+                         gated_residual_onednn_quant_test,
+                         ::testing::Values(gr_quant_case{1, 640, 320, true},
+                                           gr_quant_case{17, 640, 320, true},
+                                           gr_quant_case{17, 640, 320, false},
+                                           gr_quant_case{100, 640, 320, true},
+                                           gr_quant_case{100, 640, 320, false},
+                                           gr_quant_case{257, 2560, 320, true},
+                                           gr_quant_case{257, 2560, 320, false},
+                                           gr_quant_case{33, 128, 64, true},
+                                           gr_quant_case{37, 96, 64, false},
+                                           gr_quant_case{17, 640, 320, true, false, false, true},               // i4
+                                           gr_quant_case{17, 640, 320, false, false, false, true},              // i8
+                                           gr_quant_case{17, 640, 320, true, false, false, false, false},       // u4, no zero points
+                                           gr_quant_case{100, 640, 320, false, false, false, true, false},      // i8, no zero points
+                                           gr_quant_case{17, 640, 320, true, false, false, false, true, 64},    // 4-bit, group 64
+                                           gr_quant_case{100, 640, 320, false, false, false, false, true, 64},  // 8-bit, grouped scales
+                                           gr_quant_case{1, 640, 320, true, false, true},                       // write gate
+                                           gr_quant_case{100, 640, 320, false, false, true},
+                                           gr_quant_case{257, 640, 320, true, false, true},
+                                           gr_quant_case{17, 5120, 640, true},
+                                           gr_quant_case{100, 5120, 640, false, false, true},
+                                           gr_quant_case{1100, 640, 320, true},  // above the W_up predequantization threshold of `onednn`
+                                           gr_quant_case{1100, 640, 320, false, false, true}));
 
 /// R'_c = R_c + S_c * Y
 std::vector<float> reference_write(size_t rows,
@@ -1283,6 +1493,572 @@ TEST_P(gated_residual_dynamic_write_test, ov_model_reuses_dispatch_data) {
 // D = 256 is hidden_size / C.
 INSTANTIATE_TEST_SUITE_P(smoke, gated_residual_dynamic_write_test, ::testing::Values(gr_dynamic_write_case{64}, gr_dynamic_write_case{256}));
 
+// --- roofline perf harness (token_size sweep) ------------------------------
+//
+// Roofline harness: builds the production-shaped
+// READ/MIX network once per (phase, token_size), times repeated executions with GPU-side
+// profiling enabled, and prints one JSON line per measurement. These tests do not check
+// output values. Run with:
+//   ov_gpu_unit_tests --gtest_also_run_disabled_tests --gtest_filter='*DISABLED_roofline*'
+namespace roofline {
+
+double mean_ms(const std::vector<double>& v) {
+    double sum = 0.0;
+    for (double x : v) {
+        sum += x;
+    }
+    return v.empty() ? 0.0 : sum / static_cast<double>(v.size());
+}
+
+/// Extracts the GPU-side "executing" duration of `ev`, in milliseconds, or -1.0 if `ev`
+/// is null or has no such interval. GPU-side timing is used instead of host wall-clock so
+/// host dispatch overhead (which the roofline model does not account for) is excluded.
+double executing_ms(const event::ptr& ev) {
+    if (ev == nullptr) {
+        return -1.0;
+    }
+    for (const auto& interval : ev->get_profiling_info()) {
+        if (interval.stage == instrumentation::profiling_stage::executing && interval.value != nullptr) {
+            return static_cast<double>(interval.value->value().count()) / 1.0e6;
+        }
+    }
+    return -1.0;
+}
+
+/// GPU-side mean duration of one gated_residual call. The profiling event of a multi-dispatch READ aggregates all of its kernels.
+double time_primitive_ms(network& net, const std::string& primitive_id, int warmup, int iterations) {
+    for (int i = 0; i < warmup; i++) {
+        net.execute().at("sink").get_memory();
+    }
+    // Iterations are enqueued back-to-back and only synchronized at the end: a host wait per
+    // iteration leaves the GPU idle long enough for DVFS to drop the clock, which makes the
+    // per-kernel times drift within one run.
+    std::vector<event::ptr> events;
+    events.reserve(static_cast<size_t>(iterations));
+    for (int i = 0; i < iterations; i++) {
+        net.execute();
+        events.push_back(net.get_executed_primitives().at(primitive_id));
+    }
+    std::vector<double> samples;
+    samples.reserve(events.size());
+    for (const auto& ev : events) {
+        ev->wait();
+        const double ms = executing_ms(ev);
+        if (ms >= 0.0) {
+            samples.push_back(ms);
+        }
+    }
+    if (samples.empty()) {
+        ADD_FAILURE() << "no 'executing' profiling interval was captured for " << primitive_id;
+        return 0.0;
+    }
+    return mean_ms(samples);
+}
+
+void print_measurement(const char* phase, size_t tokens, const char* stage, double ms) {
+    std::cout << "ROOFLINE_JSON {\"component\":\"GR\",\"phase\":\"" << phase << "\",\"tokens\":" << tokens << ",\"stage\":\"" << stage << "\",\"ms\":" << ms
+              << "}" << std::endl;
+}
+
+/// `phase == "prefill"` runs the whole context as one call (`rows = tokens`);
+/// `phase == "decode"` runs a single row, matching the QSA harness's query counts. The
+/// shape is the production hyper-connection width: hidden_size = 2560, C = 4 branches
+/// (D = 640), low-rank width = 320.
+void run_point(const char* phase, size_t tokens) {
+    if (!gr_available()) {
+        GTEST_SKIP() << "no GatedResidual implementation is available on this device";
+    }
+    const bool decode = std::string(phase) == "decode";
+    const size_t rows = decode ? 1 : tokens;
+
+    gr_ref_params p;
+    p.C = kBranches;
+    p.D = 640;
+    p.L = 320;
+    const size_t CD = p.C * p.D;
+
+    tests::random_generator rg;
+    rg.set_seed(GET_SUITE_NAME);
+    const auto residual = random_vec(rg, rows * CD, 1.0f);
+    const auto gain = random_vec(rg, CD, 0.5f, 1.0f);
+    const auto w_down = random_vec(rg, p.L * CD, 0.1f);
+    const auto w_up = random_vec(rg, CD * p.L, 0.1f);
+
+    auto& engine = get_test_engine();
+    // Device-resident like real activations; the default lockable allocation is usm_shared
+    // on dGPU, which would make RBAR measure PCIe reads instead of the kernel.
+    auto residual_mem = engine.allocate_memory(layout{ov::PartialShape{static_cast<int64_t>(rows), static_cast<int64_t>(CD)}, data_types::f16, format::bfyx},
+                                               allocation_type::usm_device);
+    const auto residual_f16 = to_f16(residual);
+    residual_mem->copy_from(get_test_stream(), residual_f16.data(), true);
+
+    topology topology;
+    topology.add(input_layout("residual", residual_mem->get_layout()));
+    topology.add(data("gain", make_f16(engine, {static_cast<int64_t>(CD)}, gain)));
+    topology.add(data("w_down", make_f16(engine, {static_cast<int64_t>(p.L), static_cast<int64_t>(CD)}, w_down)));
+    topology.add(data("w_up", make_f16(engine, {static_cast<int64_t>(CD), static_cast<int64_t>(p.L)}, w_up)));
+    topology.add(gated_residual("gr_read",
+                                {input_info("residual"), input_info("gain"), input_info("w_down"), input_info("w_up")},
+                                gated_residual::Mode::READ,
+                                p.C,
+                                p.D,
+                                p.L,
+                                p.eps,
+                                /*produce_write_gate=*/false));
+    // A network output's event is a marker; with a consumer the event of a multi-dispatch READ groups all of its kernels.
+    topology.add(activation("sink", input_info("gr_read"), activation_func::abs));
+
+    ExecutionConfig config = get_test_default_config(engine);
+    config.set_property(ov::intel_gpu::optimize_data(true));
+    config.set_property(ov::intel_gpu::allow_new_shape_infer(true));
+    config.set_property(ov::enable_profiling(true));
+    network net(engine, topology, config);
+    net.set_input_data("residual", residual_mem);
+
+    print_measurement(phase, tokens, "READ/MIX", time_primitive_ms(net, "gr_read", /*warmup=*/20, /*iterations=*/100));
+}
+
+}  // namespace roofline
+
+// --- f16 vs u4 vs u8 weights: same-process interleaved A/B (DISABLED; run with --gtest_also_run_disabled_tests) -------------
+//
+// Every configuration owns NL independent layers (own weight buffers) that are used round-robin, so the weights stream from DRAM
+// like in a real model instead of staying resident in L2. Output: one GR_AB json line per (rows, D, weight type, stage).
+namespace quant_ab {
+
+struct ab_config {
+    std::string name;
+    int wtype;  // 0 f16, 1 4-bit, 2 8-bit
+    bool gate;  // READ with the write gate (W_inject in the weight format of the configuration)
+    std::vector<std::unique_ptr<network>> layers;
+    size_t group = 0;  // group size along K of W_down / W_inject, see make_quant_matrix
+};
+
+/// Weights live in device memory like in a real model; the default lockable allocation is host / shared USM.
+memory::ptr to_device(engine& eng, const memory::ptr& host) {
+    auto dev = eng.allocate_memory(host->get_layout(), allocation_type::usm_device);
+    cldnn::mem_lock<uint8_t> lock(host, get_test_stream());
+    dev->copy_from(get_test_stream(), lock.data(), true);
+    return dev;
+}
+
+/// Mean GPU time of one call, cycling through the layers of `cfg`.
+double measure_cycle(ab_config& cfg, int warmup, int iterations) {
+    const size_t nl = cfg.layers.size();
+    for (int i = 0; i < warmup; i++) {
+        cfg.layers[static_cast<size_t>(i) % nl]->execute().at("sink").get_memory();
+    }
+    std::vector<event::ptr> events;
+    events.reserve(static_cast<size_t>(iterations));
+    for (int i = 0; i < iterations; i++) {
+        auto& net = *cfg.layers[static_cast<size_t>(i) % nl];
+        net.execute();
+        events.push_back(net.get_executed_primitives().at("gr"));
+    }
+    double total = 0.0;
+    for (const auto& ev : events) {
+        ev->wait();
+        total += std::max(0.0, roofline::executing_ms(ev));
+    }
+    return total / static_cast<double>(events.size());
+}
+
+}  // namespace quant_ab
+
+TEST(gated_residual_quant_ab, DISABLED_weights) {
+    if (!gr_compression_available()) {
+        GTEST_SKIP() << "compressed GatedResidual weights need an Xe2+ systolic GPU";
+    }
+    auto& engine = get_test_engine();
+    const size_t eu = engine.get_device_info().execution_units_count;
+    std::vector<std::pair<size_t, size_t>> points = {{1, 640},
+                                                     {32, 640},
+                                                     {128, 640},
+                                                     {1024, 640},
+                                                     {4096, 640},
+                                                     {1, 2560},
+                                                     {8, 2560},
+                                                     {32, 2560},
+                                                     {33, 2560},
+                                                     {128, 2560},
+                                                     {512, 2560},
+                                                     {4 * eu, 2560},
+                                                     {4 * eu + 1, 2560},
+                                                     {1024, 2560},
+                                                     {4096, 2560}};
+    // GR_AB_ROWS=8192,16384 [GR_AB_D=2560,640] replaces the default points (long-context runs).
+    if (const char* rows_env = std::getenv("GR_AB_ROWS")) {
+        std::vector<size_t> row_list;
+        std::vector<size_t> d_list = {2560};
+        auto parse = [](const char* s, std::vector<size_t>& out) {
+            out.clear();
+            for (std::stringstream ss(s); ss.good();) {
+                std::string tok;
+                std::getline(ss, tok, ',');
+                if (!tok.empty()) {
+                    out.push_back(std::stoull(tok));
+                }
+            }
+        };
+        parse(rows_env, row_list);
+        if (const char* d_env = std::getenv("GR_AB_D")) {
+            parse(d_env, d_list);
+        }
+        points.clear();
+        for (const auto d : d_list) {
+            for (const auto r : row_list) {
+                points.emplace_back(r, d);
+            }
+        }
+    }
+    size_t L = 320;
+    if (const char* l_env = std::getenv("GR_AB_L")) {  // GR_AB_L overrides the low rank
+        L = std::stoull(l_env);
+    }
+    for (const auto& [rows, D] : points) {
+        const size_t CD = kBranches * D;
+        gr_ref_params p;
+        p.rows = rows;
+        p.D = D;
+        p.L = L;
+        tests::random_generator rg;
+        rg.set_seed(GET_SUITE_NAME);
+        std::mt19937 gen(99);
+        // Long runs tile a 4096-row random block instead of generating rows * CD values.
+        const size_t base_rows = std::min<size_t>(rows, 4096);
+        const auto residual = random_vec(rg, base_rows * CD, 1.0f);
+        const auto gain = random_vec(rg, CD, 0.5f);
+        const quant_matrix wd4 = make_quant_matrix(gen, L, CD, true);
+        const quant_matrix wu4 = make_quant_matrix(gen, CD, L, true);
+        const quant_matrix wi4 = make_quant_matrix(gen, kBranches, CD, true);
+
+        auto residual_mem =
+            engine.allocate_memory(layout{ov::PartialShape{static_cast<int64_t>(rows), static_cast<int64_t>(CD)}, data_types::f16, format::bfyx},
+                                   allocation_type::usm_device);
+        const auto residual_base_f16 = to_f16(residual);
+        std::vector<ov::float16> residual_f16(rows * CD);
+        for (size_t i = 0; i < residual_f16.size(); i++) {
+            residual_f16[i] = residual_base_f16[i % residual_base_f16.size()];
+        }
+        residual_mem->copy_from(get_test_stream(), residual_f16.data(), true);
+
+        const bool long_rows = rows >= 8192;
+        size_t nl = long_rows ? 1 : (rows <= 4 * eu ? 16 : 4);
+        if (const char* layers_env = std::getenv("GR_AB_LAYERS")) {  // 1 keeps the weights resident in cache
+            nl = std::max<size_t>(1, std::stoull(layers_env));
+        }
+        std::vector<quant_ab::ab_config> configs;
+        configs.push_back({"f16", 0, false, {}});
+        configs.push_back({"u4", 1, false, {}});
+        configs.push_back({"u8", 2, false, {}});
+        if (std::getenv("GR_AB_GATE") != nullptr) {
+            configs.push_back({"f16g", 0, true, {}});
+            configs.push_back({"u4g", 1, true, {}});
+            configs.push_back({"u8g", 2, true, {}});
+        }
+        // GR_AB_GROUPS=32,64,128: 4-bit and 8-bit configurations with these group sizes (default: 32 / per-channel)
+        if (const char* groups_env = std::getenv("GR_AB_GROUPS")) {
+            for (std::stringstream ss(groups_env); ss.good();) {
+                std::string tok;
+                std::getline(ss, tok, ',');
+                if (tok.empty()) {
+                    continue;
+                }
+                const size_t group = std::stoull(tok);
+                for (const bool gate : {false, true}) {
+                    if (gate && std::getenv("GR_AB_GATE") == nullptr) {
+                        continue;
+                    }
+                    configs.push_back({std::string("u4") + (gate ? "g" : "") + "_G" + tok, 1, gate, {}, group});
+                    configs.push_back({std::string("u8") + (gate ? "g" : "") + "_G" + tok, 2, gate, {}, group});
+                }
+            }
+        }
+        // GR_AB_ONLY=u4g_G128,u4_G128 keeps only these configurations
+        if (const char* only_env = std::getenv("GR_AB_ONLY")) {
+            const std::string only = std::string(",") + only_env + ",";
+            configs.erase(std::remove_if(configs.begin(),
+                                         configs.end(),
+                                         [&](const quant_ab::ab_config& c) {
+                                             return only.find("," + c.name + ",") == std::string::npos;
+                                         }),
+                          configs.end());
+        }
+        for (auto& cfg : configs) {
+            const bool u4 = cfg.wtype == 1;
+            const quant_matrix wd = cfg.wtype == 0 ? wd4 : make_quant_matrix(gen, L, CD, u4, false, true, cfg.group);
+            const quant_matrix wu = cfg.wtype == 0 ? wu4 : make_quant_matrix(gen, CD, L, u4, false, true, cfg.group);
+            const quant_matrix wi = cfg.wtype == 0 ? wi4 : make_quant_matrix(gen, kBranches, CD, u4, false, true, cfg.group);
+            for (size_t layer = 0; layer < nl; layer++) {
+                std::vector<memory::ptr> w;
+                if (cfg.wtype == 0) {
+                    w = {make_f16(engine, {static_cast<int64_t>(L), static_cast<int64_t>(CD)}, wd4.dequant),
+                         make_f16(engine, {static_cast<int64_t>(CD), static_cast<int64_t>(L)}, wu4.dequant)};
+                    if (cfg.gate) {
+                        w.push_back(make_f16(engine, {static_cast<int64_t>(kBranches), static_cast<int64_t>(CD)}, wi4.dequant));
+                    }
+                } else {
+                    w = {make_quant_weights(engine, wd),
+                         make_quant_weights(engine, wu),
+                         make_f16(engine, {static_cast<int64_t>(wd.G), static_cast<int64_t>(L)}, wd.scale),
+                         make_f16(engine, {static_cast<int64_t>(wu.G), static_cast<int64_t>(CD)}, wu.scale),
+                         make_quant_zp(engine, wd),
+                         make_quant_zp(engine, wu)};
+                    if (cfg.gate) {
+                        w.push_back(make_quant_weights(engine, wi));
+                        w.push_back(make_f16(engine, {static_cast<int64_t>(wi.G), static_cast<int64_t>(kBranches)}, wi.scale));
+                        w.push_back(make_quant_zp(engine, wi));
+                    }
+                }
+                topology topology;
+                topology.add(input_layout("residual", residual_mem->get_layout()));
+                topology.add(data("gain", quant_ab::to_device(engine, make_f16(engine, {static_cast<int64_t>(CD)}, gain))));
+                std::vector<input_info> inputs = {input_info("residual"), input_info("gain")};
+                for (size_t i = 0; i < w.size(); i++) {
+                    topology.add(data("w" + std::to_string(i), quant_ab::to_device(engine, w[i])));
+                    inputs.emplace_back("w" + std::to_string(i));
+                }
+                topology.add(gated_residual("gr", inputs, gated_residual::Mode::READ, p.C, D, L, p.eps, cfg.gate));
+                topology.add(activation("sink", input_info("gr"), activation_func::abs));  // see roofline::run_point
+                ExecutionConfig config = get_test_default_config(engine);
+                config.set_property(ov::intel_gpu::optimize_data(true));
+                config.set_property(ov::intel_gpu::allow_new_shape_infer(true));
+                config.set_property(ov::enable_profiling(true));
+                auto net = std::make_unique<network>(engine, topology, config);
+                net->set_input_data("residual", residual_mem);
+                cfg.layers.push_back(std::move(net));
+            }
+        }
+
+        // keep the best round of every configuration; rounds alternate between the configurations
+        std::vector<double> best(configs.size(), 1e30);
+        const int rounds = long_rows ? 3 : 8;
+        for (int r = 0; r < rounds; r++) {
+            for (size_t c = 0; c < configs.size(); c++) {
+                best[c] = std::min(best[c], quant_ab::measure_cycle(configs[c], long_rows ? 3 : 20, long_rows ? 8 : (rows >= 4096 ? 40 : 100)));
+            }
+        }
+        for (size_t c = 0; c < configs.size(); c++) {
+            std::cout << "GR_AB {\"rows\":" << rows << ",\"D\":" << D << ",\"w\":\"" << configs[c].name << "\",\"stage\":\"TOTAL\",\"us\":" << best[c] * 1000.0
+                      << "}" << std::endl;
+        }
+    }
+}
+
+// --- READ paths of f16 weights: OpenCL 3-kernel pipeline vs single kernel vs oneDNN (DISABLED; --gtest_also_run_disabled_tests) ---
+//
+// Every path owns NL layers (own weights) used round-robin like in a real model. A call is timed two ways: `ocl_us` is the mean
+// GPU time of the OpenCL kernels of the node (its profiling event does not contain the oneDNN matmul of the oneDNN path), `wall_us`
+// is the time per call of NL * REPS back-to-back executions drained by one finish (all kernels, oneDNN included; equals the GPU time
+// while the host enqueues faster than the GPU runs), `host_us` the time the enqueue loop alone took per call.
+// Env: GR_PATH_AB_ROWS=1,8,17 GR_PATH_AB_D=5120,2560 GR_PATH_AB_L=640 GR_PATH_AB_GATE=1 GR_PATH_AB_PATHS=ocl3,single,onednn
+namespace path_ab {
+
+std::vector<size_t> parse_list(const char* env, std::vector<size_t> fallback) {
+    if (env == nullptr) {
+        return fallback;
+    }
+    std::vector<size_t> out;
+    for (std::stringstream ss(env); ss.good();) {
+        std::string tok;
+        std::getline(ss, tok, ',');
+        if (!tok.empty()) {
+            out.push_back(std::stoull(tok));
+        }
+    }
+    return out;
+}
+
+struct path_run {
+    std::string path;
+    std::vector<std::unique_ptr<network>> layers;
+};
+
+}  // namespace path_ab
+
+TEST(gated_residual_path_ab, DISABLED_read_paths) {
+#ifndef GPU_DEBUG_CONFIG
+    GTEST_SKIP() << "GPU_GR_KERNEL_SELECTION is a debug option";
+#else
+    if (!gr_available() || !gr_systolic()) {
+        GTEST_SKIP() << "needs the systolic READ kernels";
+    }
+    auto& engine = get_test_engine();
+    auto& stream = get_test_stream();
+    const auto rows_list = path_ab::parse_list(std::getenv("GR_PATH_AB_ROWS"), {1, 8, 17, 32, 33, 100, 257, 1000, 4096});
+    const auto d_list = path_ab::parse_list(std::getenv("GR_PATH_AB_D"), {5120});
+    const auto l_list = path_ab::parse_list(std::getenv("GR_PATH_AB_L"), {});
+    const bool gate = std::getenv("GR_PATH_AB_GATE") != nullptr;
+    std::vector<std::string> paths = {"ocl3", "single", "onednn"};
+    if (const char* paths_env = std::getenv("GR_PATH_AB_PATHS")) {
+        paths.clear();
+        for (std::stringstream ss(paths_env); ss.good();) {
+            std::string tok;
+            std::getline(ss, tok, ',');
+            if (!tok.empty()) {
+                paths.push_back(tok);
+            }
+        }
+    }
+
+    for (size_t di = 0; di < d_list.size(); di++) {
+        const size_t D = d_list[di];
+        const size_t L = l_list.empty() ? D / 8 : l_list[std::min(di, l_list.size() - 1)];
+        const size_t CD = kBranches * D;
+        for (const size_t rows : rows_list) {
+            tests::random_generator rg;
+            rg.set_seed(GET_SUITE_NAME);
+            const size_t base_rows = std::min<size_t>(rows, 1024);
+            const auto residual_base = to_f16(random_vec(rg, base_rows * CD, 1.0f));
+            std::vector<ov::float16> residual_f16(rows * CD);
+            for (size_t i = 0; i < residual_f16.size(); i++) {
+                residual_f16[i] = residual_base[i % residual_base.size()];
+            }
+            auto residual_mem =
+                engine.allocate_memory(layout{ov::PartialShape{static_cast<int64_t>(rows), static_cast<int64_t>(CD)}, data_types::f16, format::bfyx},
+                                       allocation_type::usm_device);
+            residual_mem->copy_from(stream, residual_f16.data(), true);
+            const auto gain = random_vec(rg, CD, 0.5f, 1.0f);
+            const auto w_down = random_vec(rg, L * CD, 0.1f);
+            const auto w_up = random_vec(rg, CD * L, 0.1f);
+            const auto w_inject = random_vec(rg, kBranches * CD, 0.1f);
+
+            const size_t nl = rows <= 256 ? 8 : rows < 8192 ? 3 : 1;
+            // GR_PATH_AB_W=u4|u8: compressed weights with zero points (default f16); GR_PATH_AB_G: group size along K
+            const char* w_env = std::getenv("GR_PATH_AB_W");
+            const bool quant = w_env != nullptr && std::string(w_env) != "f16";
+            std::mt19937 qgen(99);
+            const bool q4 = quant && std::string(w_env) == "u4";
+            const size_t qgroup = std::getenv("GR_PATH_AB_G") ? std::stoull(std::getenv("GR_PATH_AB_G")) : 0;
+            const quant_matrix qwd = make_quant_matrix(qgen, L, CD, q4, false, true, qgroup);
+            const quant_matrix qwu = make_quant_matrix(qgen, CD, L, q4, false, true, qgroup);
+            const quant_matrix qwi = make_quant_matrix(qgen, kBranches, CD, q4, false, true, qgroup);
+            std::vector<path_ab::path_run> runs;
+            for (const auto& path : paths) {
+                path_ab::path_run run;
+                run.path = path;
+                for (size_t layer = 0; layer < nl; layer++) {
+                    topology topology;
+                    topology.add(input_layout("residual", residual_mem->get_layout()));
+                    topology.add(data("gain", quant_ab::to_device(engine, make_f16(engine, {static_cast<int64_t>(CD)}, gain))));
+                    std::vector<memory::ptr> ws;
+                    if (quant) {
+                        ws = {make_quant_weights(engine, qwd),
+                              make_quant_weights(engine, qwu),
+                              make_quant_scale(engine, qwd),
+                              make_quant_scale(engine, qwu),
+                              make_quant_zp(engine, qwd),
+                              make_quant_zp(engine, qwu)};
+                        if (gate) {
+                            ws.push_back(make_quant_weights(engine, qwi));
+                            ws.push_back(make_quant_scale(engine, qwi));
+                            ws.push_back(make_quant_zp(engine, qwi));
+                        }
+                    } else {
+                        ws = {make_f16(engine, {static_cast<int64_t>(L), static_cast<int64_t>(CD)}, w_down),
+                              make_f16(engine, {static_cast<int64_t>(CD), static_cast<int64_t>(L)}, w_up)};
+                        if (gate) {
+                            ws.push_back(make_f16(engine, {static_cast<int64_t>(kBranches), static_cast<int64_t>(CD)}, w_inject));
+                        }
+                    }
+                    std::vector<input_info> inputs = {input_info("residual"), input_info("gain")};
+                    for (size_t i = 0; i < ws.size(); i++) {
+                        topology.add(data("w" + std::to_string(i), quant_ab::to_device(engine, ws[i])));
+                        inputs.emplace_back("w" + std::to_string(i));
+                    }
+                    topology.add(gated_residual("gr", inputs, gated_residual::Mode::READ, kBranches, D, L, 1e-6f, gate));
+                    topology.add(activation("sink", input_info("gr"), activation_func::abs));
+                    ExecutionConfig config = get_test_default_config(engine);
+                    config.set_property(ov::intel_gpu::optimize_data(true));
+                    config.set_property(ov::intel_gpu::allow_new_shape_infer(true));
+                    config.set_property(ov::enable_profiling(true));
+                    // "name@N": predequantization threshold of the compressed paths (rows above N), "inf" never
+                    const auto at = path.find('@');
+                    config.set_property(ov::intel_gpu::gr_kernel_selection(path.substr(0, at)));
+                    if (at != std::string::npos) {
+                        const auto thr = path.substr(at + 1);
+                        config.set_property(ov::intel_gpu::gr_pd_row_threshold(thr == "inf" ? int64_t{1} << 40 : std::stoll(thr)));
+                    }
+                    auto net = std::make_unique<network>(engine, topology, config);
+                    net->set_input_data("residual", residual_mem);
+                    run.layers.push_back(std::move(net));
+                }
+                runs.push_back(std::move(run));
+            }
+
+            std::vector<double> best_wall(runs.size(), 1e30);
+            std::vector<double> best_host(runs.size(), 1e30);
+            std::vector<double> best_ocl(runs.size(), 1e30);
+            const int reps = rows <= 256 ? 25 : rows < 8192 ? 10 : 4;
+            for (int round = 0; round < 6; round++) {
+                for (size_t r = 0; r < runs.size(); r++) {
+                    auto& layers = runs[r].layers;
+                    const size_t calls = layers.size() * static_cast<size_t>(reps);
+                    for (size_t i = 0; i < layers.size() * 3; i++) {
+                        layers[i % layers.size()]->execute().at("sink").get_memory();
+                    }
+                    std::vector<event::ptr> events;
+                    events.reserve(calls);
+                    const auto t0 = std::chrono::steady_clock::now();
+                    for (size_t i = 0; i < calls; i++) {
+                        auto& net = *layers[i % layers.size()];
+                        net.execute();
+                        events.push_back(net.get_executed_primitives().at("gr"));
+                    }
+                    const auto t1 = std::chrono::steady_clock::now();
+                    for (const auto& ev : events) {
+                        ev->wait();
+                    }
+                    stream.finish();
+                    const auto t2 = std::chrono::steady_clock::now();
+                    double ocl_ms = 0.0;
+                    for (const auto& ev : events) {
+                        ocl_ms += std::max(0.0, roofline::executing_ms(ev));
+                    }
+                    const double n = static_cast<double>(calls);
+                    best_host[r] = std::min(best_host[r], std::chrono::duration<double, std::micro>(t1 - t0).count() / n);
+                    best_wall[r] = std::min(best_wall[r], std::chrono::duration<double, std::micro>(t2 - t0).count() / n);
+                    best_ocl[r] = std::min(best_ocl[r], ocl_ms * 1000.0 / n);
+                }
+            }
+            for (size_t r = 0; r < runs.size(); r++) {
+                std::vector<std::string> stages;
+                stages = executed_stages(*runs[r].layers.front(), "gr");
+                std::string joined;
+                for (const auto& s : stages) {
+                    joined += (joined.empty() ? "" : "+") + s;
+                }
+                std::cout << "GR_PATH_AB {\"rows\":" << rows << ",\"D\":" << D << ",\"L\":" << L << ",\"gate\":" << gate << ",\"path\":\"" << runs[r].path
+                          << "\",\"stages\":\"" << joined << "\",\"wall_us\":" << best_wall[r] << ",\"ocl_us\":" << best_ocl[r]
+                          << ",\"host_us\":" << best_host[r] << "}" << std::endl;
+            }
+        }
+    }
+#endif
+}
+
+struct gr_roofline_case {
+    size_t tokens;
+    bool decode;
+};
+
+class gated_residual_roofline_perf : public ::testing::TestWithParam<gr_roofline_case> {};
+
+TEST_P(gated_residual_roofline_perf, measures_kernel_time) {
+    const auto p = GetParam();
+    roofline::run_point(p.decode ? "decode" : "prefill", p.tokens);
+}
+
+INSTANTIATE_TEST_SUITE_P(DISABLED_roofline,
+                         gated_residual_roofline_perf,
+                         ::testing::Values(gr_roofline_case{1024, false},
+                                           gr_roofline_case{1024, true},
+                                           gr_roofline_case{2048, false},
+                                           gr_roofline_case{2048, true},
+                                           gr_roofline_case{4096, false},
+                                           gr_roofline_case{4096, true},
+                                           gr_roofline_case{8192, false}));
+
 // Equivalence of the decomposed source graph and the fused kernel: the decomposed READ/MIX
 // model is compiled through the normal plugin pipeline (which must fuse it into a single
 // gated_residual node) and compared against the FP32 reference of the *decomposed* math.
@@ -1297,10 +2073,6 @@ TEST_P(gated_residual_decomposed_read_test, fuses_and_matches_reference) {
     }
     const bool with_write_gate = std::get<0>(GetParam());
     const bool static_rows = std::get<1>(GetParam());
-    if (static_rows && !get_test_engine().get_device_info().supports_immad) {
-        // Without immad a static f16 ReduceSum is converted to a Pooling before the fusion runs; dynamic shapes are not.
-        GTEST_SKIP() << "static-shape GatedResidual fusion is not available without immad";
-    }
 
     const size_t C = kBranches;
     const size_t D = 64;
