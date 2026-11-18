@@ -433,11 +433,11 @@ INSTANTIATE_TEST_SUITE_P(smoke,
                                            gr_read_case{32, 64, 32, true},
                                            gr_read_case{37, 96, 32, false},
                                            gr_read_case{33, 2560, 320, true},
-                                           gr_read_case{100, 2560, 320, true, true},
+                                           gr_read_case{100, 2560, 320, true},
                                            gr_read_case{257, 640, 320, true},
                                            gr_read_case{1, 5120, 640, true},
                                            gr_read_case{17, 5120, 640, true},
-                                           gr_read_case{100, 5120, 640, false, false, true},
+                                           gr_read_case{100, 5120, 640, false},
                                            gr_read_case{1000, 640, 320, true}));
 
 INSTANTIATE_TEST_SUITE_P(smoke,
@@ -736,8 +736,8 @@ TEST_P(gated_residual_quant_test, matches_decompressed_f16_path) {
     if (!tc.scalar && auto_may_use_onednn(p.rows)) {
         GTEST_SKIP() << "auto may take the oneDNN path (GPU_GR_KERNEL_SELECTION=ocl is a debug option)";
     }
-    const auto f16_run = run_gr_read(p, mode, residual, gain, f16_weights, tc.write_gate, tc.scalar ? "scalar" : ocl_path, tc.is_caching_test);
-    const auto q_run = run_gr_read(p, mode, residual, gain, q_weights, tc.write_gate, tc.scalar ? "scalar" : ocl_path, tc.is_caching_test);
+    const auto f16_run = run_gr_read(p, residual, gain, f16_weights, tc.write_gate, tc.scalar ? "scalar" : ocl_path, tc.is_caching_test);
+    const auto q_run = run_gr_read(p, residual, gain, q_weights, tc.write_gate, tc.scalar ? "scalar" : ocl_path, tc.is_caching_test);
 
     // compressed weights use the 3-dispatch pipeline unless its Rbar scratch exceeds the limit
     const auto expected = tc.scalar ? std::vector<std::string>{"READ"} : expected_read_stages(p.rows, p.D, p.L);
@@ -1012,7 +1012,6 @@ TEST_P(gated_residual_onednn_quant_test, matches_fp32_reference) {
     p.rows = tc.rows;
     p.D = tc.D;
     p.L = tc.L;
-    p.gain_plus_one = true;
     const size_t CD = p.C * p.D;
 
     tests::random_generator rg;
@@ -1040,10 +1039,9 @@ TEST_P(gated_residual_onednn_quant_test, matches_fp32_reference) {
             weights.push_back(make_quant_zp(engine, wi));
         }
     }
-    const auto mode = gated_residual::Mode::READ;
     for (const std::string path : {"onednn_q", "onednn_pd_up", "onednn"}) {
         SCOPED_TRACE(path);
-        const auto run = run_gr_read(p, mode, residual, gain, weights, tc.write_gate, path);
+        const auto run = run_gr_read(p, residual, gain, weights, tc.write_gate, path);
 
         std::vector<std::string> expected;
         if (tc.write_gate) {
@@ -1095,19 +1093,19 @@ INSTANTIATE_TEST_SUITE_P(smoke,
                                            gr_quant_case{257, 2560, 320, false},
                                            gr_quant_case{33, 128, 64, true},
                                            gr_quant_case{37, 96, 64, false},
-                                           gr_quant_case{17, 640, 320, true, false, false, true},               // i4
-                                           gr_quant_case{17, 640, 320, false, false, false, true},              // i8
-                                           gr_quant_case{17, 640, 320, true, false, false, false, false},       // u4, no zero points
-                                           gr_quant_case{100, 640, 320, false, false, false, true, false},      // i8, no zero points
-                                           gr_quant_case{17, 640, 320, true, false, false, false, true, 64},    // 4-bit, group 64
-                                           gr_quant_case{100, 640, 320, false, false, false, false, true, 64},  // 8-bit, grouped scales
-                                           gr_quant_case{1, 640, 320, true, false, true},                       // write gate
-                                           gr_quant_case{100, 640, 320, false, false, true},
-                                           gr_quant_case{257, 640, 320, true, false, true},
+                                           gr_quant_case{17, 640, 320, true, false, true},               // i4
+                                           gr_quant_case{17, 640, 320, false, false, true},              // i8
+                                           gr_quant_case{17, 640, 320, true, false, false, false},       // u4, no zero points
+                                           gr_quant_case{100, 640, 320, false, false, true, false},      // i8, no zero points
+                                           gr_quant_case{17, 640, 320, true, false, false, true, 64},    // 4-bit, group 64
+                                           gr_quant_case{100, 640, 320, false, false, false, true, 64},  // 8-bit, grouped scales
+                                           gr_quant_case{1, 640, 320, true, true},                       // write gate
+                                           gr_quant_case{100, 640, 320, false, true},
+                                           gr_quant_case{257, 640, 320, true, true},
                                            gr_quant_case{17, 5120, 640, true},
-                                           gr_quant_case{100, 5120, 640, false, false, true},
+                                           gr_quant_case{100, 5120, 640, false, true},
                                            gr_quant_case{1100, 640, 320, true},  // above the W_up predequantization threshold of `onednn`
-                                           gr_quant_case{1100, 640, 320, false, false, true}));
+                                           gr_quant_case{1100, 640, 320, false, true}));
 
 /// R'_c = R_c + S_c * Y
 std::vector<float> reference_write(size_t rows,

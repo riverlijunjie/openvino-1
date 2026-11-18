@@ -36,6 +36,12 @@ namespace caps = cldnn::gated_residual_caps;
 
 namespace {
 
+constexpr size_t gr_sg = 16;           // subgroup size == one hardware thread on Xe2+
+constexpr size_t gr_wg_size = 16;      // subgroups of the scalar / single-kernel work-groups
+constexpr size_t gr_dpas_k_step = 32;  // K consumed per dpas loop step (two K16 slices)
+constexpr size_t gr_dpas_n = 16;       // dpas N axis == GRF width on Xe2+
+constexpr size_t gr_down_tn = 32;      // low-rank columns per down-projection subgroup
+constexpr size_t gr_decode_rows = 32;  // up to here both GEMMs use decode tiling
 constexpr size_t gr_up_micro_mid_rows = 128;  // up to here the micro-GEMM UP_PROJ uses the narrower token tiling
 constexpr size_t gr_read_dpas_tm = 32;
 constexpr size_t gr_read_dpas_nt = 2;
